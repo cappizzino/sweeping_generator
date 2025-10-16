@@ -1,0 +1,28 @@
+<launch>
+
+  <!-- args corresponding to environment variables -->
+  <arg name="UAV_NAME" default="$(optenv UAV_NAME)" />
+  <arg name="UAV_NAMES" default="$(optenv UAV_NAMES)" />
+  <arg name="COMPUTER_NAME" default="$(optenv COMPUTER_NAME)" />
+
+    <!-- Namespace - all topics, services and parameters will be remapped using this namespace as a prefix (eg.: "/waypoint_flier_simple/odom_uav_in" to "/uav1/waypoint_flier_simple/odom_uav_in") -->
+  <group ns="$(arg UAV_NAME)">
+
+    <node pkg="sweeping_generator" type="swarm_sweeping.py" name="sweeping_generator" output="screen">
+
+        <!-- ROS parameters config file -->
+      <rosparam file="$(find sweeping_generator)/config/sweeping_generator.yaml" />
+
+      <param name="uav_name" value="$(arg UAV_NAME)" />
+      <param name="uav_names" type="yaml" value="$(arg UAV_NAMES)"/>
+      <param name="computer_name" value="$(arg COMPUTER_NAME)" />
+
+      <remap from="~control_manager_diag_in" to="control_manager/diagnostics" />
+      <remap from="~path_out" to="trajectory_generation/path" />
+      <remap from="~start_in" to="~start" />
+
+    </node>
+
+  </group>
+
+</launch>
