@@ -290,7 +290,7 @@ class Node:
 
         # Compute follower offset in leader frame
         dx_body = -self.r * self.wing_index
-        dy_body = self.offset_sign * (numpy.sqrt(3.0) * self.side / 2.0) * self.wing_index
+        dy_body = self.offset_sign * (self.side / 2.0)
 
         # Rotate offset to world frame
         dx_world = dx_body * numpy.cos(heading) - dy_body * numpy.sin(heading)
