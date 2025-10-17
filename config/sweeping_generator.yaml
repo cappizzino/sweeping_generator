@@ -4,10 +4,10 @@ leader_msg: "mpc"
 frame_publish: "utm_origin"
 
 timer_main:
-  rate: 0.5 # [Hz]
+  rate: 2.0 # [Hz]
 
 timer_pose:
-  rate: 0.5 # [Hz]
+  rate: 2.0 # [Hz]
 
 center:
   x: 5.0 # [m]
@@ -20,3 +20,4 @@ dimensions:
 
 angle: 0.0
 lateral_scale: 1.0
+side: 6.0

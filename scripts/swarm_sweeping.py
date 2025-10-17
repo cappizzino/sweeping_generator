@@ -53,14 +53,15 @@ class Node:
 
         self.angle = rospy.get_param("~angle")
         self.lateral_scale = rospy.get_param("~lateral_scale")
+        self.side = rospy.get_param("~side")
 
-        self.side = 3.0
         if self.id != 0:
             if self.id % 2 == 0:
                 self.offset_sign = math.ceil(self.id/2)
             else:
                 self.offset_sign = -math.ceil(self.id/2)
         self.r = self.side / numpy.sqrt(3.0)
+        self.wing_index = math.ceil(self.id/2)
 
         rospy.loginfo('[SweepingGenerator]: initialized')
 
@@ -288,8 +289,8 @@ class Node:
         heading = msg.heading
 
         # Compute follower offset in leader frame
-        dx_body = -self.r
-        dy_body = self.offset_sign * (self.side / 2.0)
+        dx_body = -self.r * self.wing_index
+        dy_body = self.offset_sign * (numpy.sqrt(3.0) * self.side / 2.0) * self.wing_index
 
         # Rotate offset to world frame
         dx_world = dx_body * numpy.cos(heading) - dy_body * numpy.sin(heading)
@@ -428,6 +429,11 @@ class Node:
             rospy.logerr(f"Transform failed: {e}")
             return None
 
+    def rotate(self, x, y, theta):
+        return (
+            x * numpy.cos(theta) - y * numpy.sin(theta),
+            x * numpy.sin(theta) + y * numpy.cos(theta)
+        )
 
 if __name__ == '__main__':
     try:
