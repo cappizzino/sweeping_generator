@@ -19,3 +19,4 @@ dimensions:
   y: 80.0 # [m]
 
 angle: 0.0
+lateral_scale: 1.0

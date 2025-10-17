@@ -52,6 +52,7 @@ class Node:
         self.timer_pose_rate = rospy.get_param("~timer_pose/rate")
 
         self.angle = rospy.get_param("~angle")
+        self.lateral_scale = rospy.get_param("~lateral_scale")
 
         self.side = 3.0
         if self.id != 0:
@@ -141,11 +142,17 @@ class Node:
 
         return path_msg
 
-    def planInfinityPath(self, step_size, angle=0.0):
+    def planInfinityPath(self, step_size, angle=0.0, lateral_scale=1.0):
         """
-        Generate an infinity (lemniscate) path rotated by `angle` radians.
+        Generate an infinity (Lemniscate of Bernoulli) path rotated by `angle` radians
+        and stretched laterally by `lateral_scale`.
+
+        Parameters:
+        - step_size: sampling step in radians
+        - angle: rotation in radians (counterclockwise)
+        - lateral_scale: multiplier for lateral (y-axis) width of the infinity
         """
-        rospy.loginfo('[SweepingGenerator]: planning infinity path (Lemniscate of Bernoulli, rotated)')
+        rospy.loginfo('[SweepingGenerator]: planning infinity path (rotated + lateral scaled)')
 
         # Prepare path message
         path_msg = PathSrvRequest()
@@ -171,7 +178,10 @@ class Node:
             x = (a * numpy.cos(t)) / denom
             y = (a * numpy.cos(t) * numpy.sin(t)) / denom
 
-            # Rotate by given angle around origin
+            # Apply lateral scaling
+            y *= lateral_scale
+
+            # Rotate by given angle
             x_rot = x * numpy.cos(angle) - y * numpy.sin(angle)
             y_rot = x * numpy.sin(angle) + y * numpy.cos(angle)
 
@@ -249,7 +259,7 @@ class Node:
         # set the step size based on the service data
         step_size = req.goal
 
-        path_msg = self.planInfinityPath(step_size, angle=self.angle)
+        path_msg = self.planInfinityPath(step_size, angle=self.angle, lateral_scale=self.lateral_scale)
 
         try:
             response = self.sc_path.call(path_msg)
