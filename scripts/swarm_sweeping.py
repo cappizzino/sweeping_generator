@@ -304,7 +304,7 @@ class Node:
         # Publish reference
         ref = ReferenceStamped()
         ref.header.stamp = rospy.Time.now()
-        ref.header.frame_id = self.uav_name + "/utm_origin"
+        ref.header.frame_id = self.uav_name + "/" + self.frame_id
         ref.reference.position.x = target_x
         ref.reference.position.y = target_y
         ref.reference.position.z = target_z
