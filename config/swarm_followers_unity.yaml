@@ -1,0 +1,10 @@
+world_frame: "world_origin"
+
+timer_point:
+  rate: 2.0 # [Hz]
+
+timer_heading:
+  rate: 2.0 # [Hz]
+
+index: 4
+side: 6.0

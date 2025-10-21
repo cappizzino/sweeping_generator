@@ -1,0 +1,23 @@
+<launch>
+
+  <!-- args corresponding to environment variables -->
+  <arg name="UAV_NAME" default="$(optenv UAV_NAME uav2)" />
+  <arg name="UAV_NAMES" default="$(optenv UAV_NAMES [uav1,uav2,uav3,uav4])" />
+  <arg name="COMPUTER_NAME" default="$(optenv COMPUTER_NAME asus1)" />
+
+  <group ns="$(arg UAV_NAME)">
+
+    <node pkg="sweeping_generator" type="swarm_followers_unity.py" name="swarm_followers_unity" output="screen">
+
+        <!-- ROS parameters config file -->
+      <rosparam file="$(find sweeping_generator)/config/swarm_followers_unity.yaml" />
+
+      <param name="uav_name" value="$(arg UAV_NAME)" />
+      <param name="uav_names" type="yaml" value="$(arg UAV_NAMES)"/>
+      <param name="computer_name" value="$(arg COMPUTER_NAME)" />
+
+    </node>
+
+  </group>
+
+</launch>
