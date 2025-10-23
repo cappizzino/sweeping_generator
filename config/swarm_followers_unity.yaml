@@ -1,4 +1,8 @@
-world_frame: "world_origin"
+world_frame: "map"
+human_name: "human"
+
+timer_human:
+  rate: 1.0 # [Hz]
 
 timer_point:
   rate: 2.0 # [Hz]
@@ -6,5 +10,5 @@ timer_point:
 timer_heading:
   rate: 2.0 # [Hz]
 
-index: 4
-side: 6.0
+index: 0
+side: 10.0

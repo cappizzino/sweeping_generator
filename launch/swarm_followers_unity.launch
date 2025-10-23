@@ -7,7 +7,7 @@
 
   <group ns="$(arg UAV_NAME)">
 
-    <node pkg="sweeping_generator" type="swarm_followers_unity.py" name="swarm_followers_unity" output="screen">
+    <node pkg="sweeping_generator" type="swarm_followers_unity.py" name="swarm_followers_unity_$(arg UAV_NAME)" output="screen">
 
         <!-- ROS parameters config file -->
       <rosparam file="$(find sweeping_generator)/config/swarm_followers_unity.yaml" />

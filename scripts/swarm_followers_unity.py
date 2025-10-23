@@ -22,6 +22,7 @@ class Node:
         self.uav_name = rospy.get_param("~uav_name", "uav1")
         self.drone_list = rospy.get_param('~uav_names', [])
         self.computer_name = rospy.get_param("~computer_name", "computer1")
+        self.human_name = rospy.get_param("~human_name", "human")
 
         self.leader_name = self.drone_list[0]
 
@@ -36,6 +37,7 @@ class Node:
         rospy.loginfo("ID: %d", self.id)
 
         self.world_frame = rospy.get_param("~world_frame", "world")
+        self.timer_human_rate = rospy.get_param("~timer_human/rate")
         self.timer_point_rate = rospy.get_param("~timer_point/rate")
         self.timer_heading_rate = rospy.get_param("~timer_heading/rate")
 
@@ -51,24 +53,30 @@ class Node:
         self.wing_index = math.ceil(self.id/2)
 
         self.heading = 0.0
+        self.humanPose = Point()
 
         ## | ----------------------- TF listener ---------------------- |
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
         ## | ----------------------- subscribers ---------------------- |
-        self.sub_unity = rospy.Subscriber(f"/{self.leader_name}/unity/pose", PoseArray, self.callbackUnity)
+        self.sub_unity = rospy.Subscriber(f"/uav/{self.leader_name}/path_0/pose_array", PoseArray, self.callbackUnity)
 
         ## | --------------------- Action clients -------------------- |
+        self.action_name = f"/uav/{self.uav_name}/action/GoTo"
         self.goto_client = actionlib.SimpleActionClient(
-            f"/{self.uav_name}/goto_action", GoToAction
+            self.action_name, GoToAction
         )
         rospy.loginfo(f"[{self.uav_name}] Waiting for GoTo action server...")
         self.goto_client.wait_for_server(timeout=rospy.Duration(5.0))
 
         ## | ------------------------- timers ------------------------- |
-        self.timer_point = rospy.Timer(rospy.Duration(1.0/self.timer_point_rate), self.timerPoint)
-        self.timer_heading = rospy.Timer(rospy.Duration(1.0/self.timer_heading_rate), self.timerHeading)
+        if self.leader_swarm:
+            # Human Pose Timer
+            self.timer_human = rospy.Timer(rospy.Duration(1.0/self.timer_human_rate), self.timerHuman)
+        else:
+            self.timer_point = rospy.Timer(rospy.Duration(1.0/self.timer_point_rate), self.timerPoint)
+            self.timer_heading = rospy.Timer(rospy.Duration(1.0/self.timer_heading_rate), self.timerHeading)
 
         ## | -------------------- spin till the end ------------------- |
         rospy.loginfo('[Swarm_Unity]: initialized')
@@ -99,7 +107,7 @@ class Node:
         rospy.loginfo(f"[{self.uav_name}] GoTo finished with result: {result.result}")
 
     def goto_active_cb(self):
-        rospy.loginfo(f"[{self.uav_name}] GoTo goal is now active.")
+        rospy.loginfo_once(f"[{self.uav_name}] GoTo goal is now active.")
 
     def goto_feedback_cb(self, feedback):
         rospy.loginfo_throttle(1.0, f"[{self.uav_name}] Feedback: {feedback.feedback:.2f}")
@@ -109,27 +117,33 @@ class Node:
     # #{ reference_follower():
 
     def reference_follower(self, msg):
-        # Extract leader state
-        x = msg.x
-        y = msg.y
-        z = msg.z
 
-        # Compute follower offset in leader frame
-        dx_body = -self.r * self.wing_index
-        dy_body = self.offset_sign * (self.side / 2.0)
-
-        # Rotate offset to world frame
-        dx_world = dx_body * numpy.cos(self.heading) - dy_body * numpy.sin(self.heading)
-        dy_world = dx_body * numpy.sin(self.heading) + dy_body * numpy.cos(self.heading)
-
-        # Compute follower desired position
-        target_x = x + dx_world
-        target_y = y + dy_world
-        target_z = z  # same altitude
-
-        # Prepare goal message
         goal_msg = GoToGoal()
-        goal_msg.target = Point(target_x, target_y, target_z)
+        
+        if self.leader_swarm:
+            # Prepare goal message
+            goal_msg.target = Point(msg.x, -msg.y, msg.z)
+        else:
+            # Extract leader state
+            x = msg.x
+            y = msg.y
+            z = msg.z
+
+            # Compute follower offset in leader frame
+            dx_body = -self.r * self.wing_index
+            dy_body = self.offset_sign * (self.side / 2.0)
+
+            # Rotate offset to world frame
+            dx_world = dx_body * numpy.cos(self.heading) - dy_body * numpy.sin(self.heading)
+            dy_world = dx_body * numpy.sin(self.heading) + dy_body * numpy.cos(self.heading)
+
+            # Compute follower desired position
+            target_x = x + dx_world
+            target_y = y + dy_world
+            target_z = z  # same altitude
+
+            # Prepare goal message
+            goal_msg.target = Point(target_x, -target_y, target_z)
 
         # rospy.loginfo_throttle(1.0, f"[{self.uav_name}] Sending GoTo goal: ({target_x:.2f}, {target_y:.2f}, {target_z:.2f})")
 
@@ -145,6 +159,30 @@ class Node:
 
     ## | ------------------------- timers ------------------------- |
 
+    # #{ timerHuman()
+    def timerHuman(self, event=None):
+        
+        if not self.is_initialized:
+            return
+
+        rospy.loginfo_once('[Swarm_Unity]: human pose timer spinning')
+
+        try:
+            # Lookup human's transform relative to world
+            transform = self.tf_buffer.lookup_transform(
+                self.world_frame, f"{self.human_name}", rospy.Time(0), rospy.Duration(0.5)
+            )
+
+            self.humanPose.x = transform.transform.translation.x
+            self.humanPose.y = transform.transform.translation.y
+            self.humanPose.z = transform.transform.translation.z
+
+            self.reference_follower(self.humanPose)
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            rospy.logwarn_throttle(2.0, f"[{self.uav_name}] Could not get transform from {self.world_frame} to {self.human_name}")
+
+    # #} end of timerHuman()
+
     # #{ timerPoint()
 
     def timerPoint(self, event=None):
@@ -157,10 +195,14 @@ class Node:
         if isinstance(self.sub_unity, PoseArray):
 
             input_pose = Point()
-            i_mpc = int(len(self.sub_unity.poses)/self.index)
+            if self.index == 0:
+                i_mpc = 1
+            else:
+                i_mpc = int(len(self.sub_unity.poses)/self.index)
             input_pose.x = self.sub_unity.poses[i_mpc].position.x
             input_pose.y = self.sub_unity.poses[i_mpc].position.y
             input_pose.z = self.sub_unity.poses[i_mpc].position.z
+            rospy.loginfo_throttle(1.0, f"[{self.uav_name}] Leader position: ({input_pose.x:.2f}, {input_pose.y:.2f}, {input_pose.z:.2f})")
             self.reference_follower(input_pose)
 
         else:
@@ -180,7 +222,7 @@ class Node:
         try:
             # Lookup leader's transform relative to world
             transform = self.tf_buffer.lookup_transform(
-                self.world_frame, f"{self.leader_name}/tf", rospy.Time(0), rospy.Duration(0.5)
+                self.world_frame, f"{self.leader_name}/base_link", rospy.Time(0), rospy.Duration(0.5)
             )
 
             # Extract quaternion rotation
@@ -195,7 +237,7 @@ class Node:
             rospy.loginfo_throttle(1.0, f"[{self.uav_name}] Leader heading: {math.degrees(yaw):.2f}°")
 
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-            rospy.logwarn_throttle(2.0, f"[{self.uav_name}] Could not get transform from {self.world_frame} to {self.leader_name}/tf")
+            rospy.logwarn_throttle(2.0, f"[{self.uav_name}] Could not get transform from {self.world_frame} to {self.leader_name}")
 
     # #} end of timerHeading()
 
