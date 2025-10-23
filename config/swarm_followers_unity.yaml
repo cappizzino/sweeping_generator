@@ -12,3 +12,4 @@ timer_heading:
 
 index: 0
 side: 10.0
+human_distance_threshold: 20.0

@@ -43,7 +43,9 @@ class Node:
 
         self.index = rospy.get_param("~index")
         self.side = rospy.get_param("~side")
+        self.human_distance_threshold = rospy.get_param("~human_distance_threshold", 10.0)
 
+        ## | --------------------- variables -------------------- |
         if self.id != 0:
             if self.id % 2 == 0:
                 self.offset_sign = math.ceil(self.id/2)
@@ -54,6 +56,8 @@ class Node:
 
         self.heading = 0.0
         self.humanPose = Point()
+        self.humanPoseInitial = Point()
+        self.getting_initial_human_pose = True
 
         ## | ----------------------- TF listener ---------------------- |
         self.tf_buffer = tf2_ros.Buffer()
@@ -157,6 +161,33 @@ class Node:
     
     # #} end of callbackStart
 
+    # #{ compute_distance()
+
+    def compute_distance(self, point: Point, reference: Point = None) -> float:
+        """
+        Compute the Euclidean distance between a given Point and a reference point (default: origin).
+
+        Args:
+            point (Point): Target position (e.g., human location)
+            reference (Point, optional): Reference point (defaults to world origin)
+
+        Returns:
+            float: Euclidean distance
+        """
+        if reference is None:
+            reference = Point(0.0, 0.0, 0.0)
+
+        dx = point.x - reference.x
+        dy = point.y - reference.y
+
+        distance = math.sqrt(dx**2 + dy**2)
+        # rospy.loginfo_throttle(1.0, f"Computed distance: {distance:.2f} m")
+
+        return distance
+
+    # #} end of compute_distance()
+
+
     ## | ------------------------- timers ------------------------- |
 
     # #{ timerHuman()
@@ -177,10 +208,20 @@ class Node:
             self.humanPose.y = transform.transform.translation.y
             self.humanPose.z = transform.transform.translation.z
 
-            self.reference_follower(self.humanPose)
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
             rospy.logwarn_throttle(2.0, f"[{self.uav_name}] Could not get transform from {self.world_frame} to {self.human_name}")
 
+        if self.getting_initial_human_pose:
+            self.getting_initial_human_pose = False
+            self.humanPoseInitial = transform.transform.translation
+            rospy.loginfo(f"[{self.uav_name}] Initial human position recorded at ({self.humanPoseInitial.x:.2f}, {self.humanPoseInitial.y:.2f}, {self.humanPoseInitial.z:.2f})")
+
+        else:
+            distance = self.compute_distance(self.humanPose, self.humanPoseInitial)
+            if distance > self.human_distance_threshold:
+                rospy.loginfo(f"[{self.uav_name}] Human is within range, switching to human following mode.")
+                self.reference_follower(self.humanPose)
+                self.getting_initial_human_pose = True
     # #} end of timerHuman()
 
     # #{ timerPoint()
