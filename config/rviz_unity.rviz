@@ -1,0 +1,383 @@
+Panels:
+  - Class: rviz/Displays
+    Help Height: 78
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /human1
+      Splitter Ratio: 0.5
+    Tree Height: 719
+  - Class: rviz/Selection
+    Name: Selection
+  - Class: rviz/Tool Properties
+    Expanded:
+      - /2D Pose Estimate1
+      - /2D Nav Goal1
+      - /Publish Point1
+    Name: Tool Properties
+    Splitter Ratio: 0.5886790156364441
+  - Class: rviz/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: rviz/Time
+    Name: Time
+    SyncMode: 0
+    SyncSource: PointCloud2
+Preferences:
+  PromptSaveOnExit: true
+Toolbars:
+  toolButtonStyle: 2
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 5
+      Class: rviz/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 300
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 100
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Class: rviz/TF
+      Enabled: true
+      Filter (blacklist): ""
+      Filter (whitelist): ""
+      Frame Timeout: 15
+      Frames:
+        All Enabled: false
+        drone_0/base_link:
+          Value: false
+        drone_1/base_link:
+          Value: false
+        drone_10/base_link:
+          Value: false
+        drone_11/base_link:
+          Value: false
+        drone_12/base_link:
+          Value: false
+        drone_13/base_link:
+          Value: false
+        drone_14/base_link:
+          Value: false
+        drone_15/base_link:
+          Value: false
+        drone_16/base_link:
+          Value: false
+        drone_17/base_link:
+          Value: false
+        drone_18/base_link:
+          Value: false
+        drone_19/base_link:
+          Value: false
+        drone_2/base_link:
+          Value: false
+        drone_20/base_link:
+          Value: false
+        drone_21/base_link:
+          Value: false
+        drone_22/base_link:
+          Value: false
+        drone_23/base_link:
+          Value: false
+        drone_24/base_link:
+          Value: false
+        drone_25/base_link:
+          Value: false
+        drone_26/base_link:
+          Value: false
+        drone_27/base_link:
+          Value: false
+        drone_28/base_link:
+          Value: false
+        drone_29/base_link:
+          Value: false
+        drone_3/base_link:
+          Value: false
+        drone_30/base_link:
+          Value: false
+        drone_31/base_link:
+          Value: false
+        drone_32/base_link:
+          Value: false
+        drone_33/base_link:
+          Value: false
+        drone_4/base_link:
+          Value: false
+        drone_5/base_link:
+          Value: false
+        drone_6/base_link:
+          Value: false
+        drone_7/base_link:
+          Value: false
+        drone_8/base_link:
+          Value: false
+        drone_9/base_link:
+          Value: false
+        human:
+          Value: false
+        map:
+          Value: false
+        odom:
+          Value: false
+      Marker Alpha: 1
+      Marker Scale: 1
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Tree:
+        drone_10/base_link:
+          {}
+        drone_11/base_link:
+          {}
+        drone_12/base_link:
+          {}
+        drone_13/base_link:
+          {}
+        drone_14/base_link:
+          {}
+        drone_15/base_link:
+          {}
+        drone_16/base_link:
+          {}
+        drone_17/base_link:
+          {}
+        drone_18/base_link:
+          {}
+        drone_19/base_link:
+          {}
+        drone_20/base_link:
+          {}
+        drone_21/base_link:
+          {}
+        drone_22/base_link:
+          {}
+        drone_23/base_link:
+          {}
+        drone_24/base_link:
+          {}
+        drone_25/base_link:
+          {}
+        drone_26/base_link:
+          {}
+        drone_27/base_link:
+          {}
+        drone_28/base_link:
+          {}
+        drone_29/base_link:
+          {}
+        drone_3/base_link:
+          {}
+        drone_30/base_link:
+          {}
+        drone_31/base_link:
+          {}
+        drone_32/base_link:
+          {}
+        drone_33/base_link:
+          {}
+        drone_4/base_link:
+          {}
+        drone_5/base_link:
+          {}
+        drone_6/base_link:
+          {}
+        drone_7/base_link:
+          {}
+        drone_8/base_link:
+          {}
+        drone_9/base_link:
+          {}
+        odom:
+          drone_0/base_link:
+            {}
+          drone_1/base_link:
+            {}
+          drone_2/base_link:
+            {}
+          human:
+            {}
+          map:
+            {}
+      Update Interval: 0
+      Value: true
+    - Alpha: 1
+      Arrow Length: 0.30000001192092896
+      Axes Length: 0.30000001192092896
+      Axes Radius: 0.009999999776482582
+      Class: rviz/PoseArray
+      Color: 255; 25; 0
+      Enabled: true
+      Head Length: 0.07000000029802322
+      Head Radius: 0.029999999329447746
+      Name: PoseArray
+      Queue Size: 10
+      Shaft Length: 0.23000000417232513
+      Shaft Radius: 0.009999999776482582
+      Shape: Arrow (Flat)
+      Topic: /uav/drone_0/path_0/pose_array
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 17.983020782470703
+        Min Value: 3.206364631652832
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.10000000149011612
+      Style: Points
+      Topic: /uav/drone_0/pointcloud2/lidar/points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Class: rviz/Axes
+      Enabled: true
+      Length: 1
+      Name: map
+      Radius: 0.10000000149011612
+      Reference Frame: <Fixed Frame>
+      Show Trail: false
+      Value: true
+    - Alpha: 1
+      Class: rviz/Axes
+      Enabled: true
+      Length: 1
+      Name: drone0
+      Radius: 0.5
+      Reference Frame: drone_0/base_link
+      Show Trail: false
+      Value: true
+    - Alpha: 1
+      Class: rviz/Axes
+      Enabled: true
+      Length: 1
+      Name: drone1
+      Radius: 0.5
+      Reference Frame: drone_1/base_link
+      Show Trail: false
+      Value: true
+    - Alpha: 1
+      Class: rviz/Axes
+      Enabled: true
+      Length: 1
+      Name: drone2
+      Radius: 0.5
+      Reference Frame: drone_2/base_link
+      Show Trail: false
+      Value: true
+    - Alpha: 1
+      Class: rviz/Axes
+      Enabled: true
+      Length: 5
+      Name: human
+      Radius: 1
+      Reference Frame: human
+      Show Trail: false
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Default Light: true
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+      Hide Inactive Objects: true
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+    - Class: rviz/SetInitialPose
+      Theta std deviation: 0.2617993950843811
+      Topic: /initialpose
+      X std deviation: 0.5
+      Y std deviation: 0.5
+    - Class: rviz/SetGoal
+      Topic: /move_base_simple/goal
+    - Class: rviz/PublishPoint
+      Single click: true
+      Topic: /clicked_point
+  Value: true
+  Views:
+    Current:
+      Angle: 0
+      Class: rviz/TopDownOrtho
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Scale: 2.450378894805908
+      Target Frame: map
+      X: 11.69637393951416
+      Y: -33.55251693725586
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 1016
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd0000000400000000000001a80000035afc0200000008fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d0000035a000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261000000010000010f0000035afc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073010000003d0000035a000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000007380000003efc0100000002fb0000000800540069006d0065010000000000000738000003bc00fffffffb0000000800540069006d00650100000000000004500000000000000000000004750000035a00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Selection:
+    collapsed: false
+  Time:
+    collapsed: false
+  Tool Properties:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 1848
+  X: 1992
+  Y: 450
