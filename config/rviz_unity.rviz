@@ -4,7 +4,7 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /human1
+        - /UAVs1
       Splitter Ratio: 0.5
     Tree Height: 719
   - Class: rviz/Selection
@@ -69,86 +69,12 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz/TF
-      Enabled: true
+      Enabled: false
       Filter (blacklist): ""
       Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        drone_0/base_link:
-          Value: false
-        drone_1/base_link:
-          Value: false
-        drone_10/base_link:
-          Value: false
-        drone_11/base_link:
-          Value: false
-        drone_12/base_link:
-          Value: false
-        drone_13/base_link:
-          Value: false
-        drone_14/base_link:
-          Value: false
-        drone_15/base_link:
-          Value: false
-        drone_16/base_link:
-          Value: false
-        drone_17/base_link:
-          Value: false
-        drone_18/base_link:
-          Value: false
-        drone_19/base_link:
-          Value: false
-        drone_2/base_link:
-          Value: false
-        drone_20/base_link:
-          Value: false
-        drone_21/base_link:
-          Value: false
-        drone_22/base_link:
-          Value: false
-        drone_23/base_link:
-          Value: false
-        drone_24/base_link:
-          Value: false
-        drone_25/base_link:
-          Value: false
-        drone_26/base_link:
-          Value: false
-        drone_27/base_link:
-          Value: false
-        drone_28/base_link:
-          Value: false
-        drone_29/base_link:
-          Value: false
-        drone_3/base_link:
-          Value: false
-        drone_30/base_link:
-          Value: false
-        drone_31/base_link:
-          Value: false
-        drone_32/base_link:
-          Value: false
-        drone_33/base_link:
-          Value: false
-        drone_4/base_link:
-          Value: false
-        drone_5/base_link:
-          Value: false
-        drone_6/base_link:
-          Value: false
-        drone_7/base_link:
-          Value: false
-        drone_8/base_link:
-          Value: false
-        drone_9/base_link:
-          Value: false
-        human:
-          Value: false
-        map:
-          Value: false
-        odom:
-          Value: false
       Marker Alpha: 1
       Marker Scale: 1
       Name: TF
@@ -156,81 +82,9 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        drone_10/base_link:
-          {}
-        drone_11/base_link:
-          {}
-        drone_12/base_link:
-          {}
-        drone_13/base_link:
-          {}
-        drone_14/base_link:
-          {}
-        drone_15/base_link:
-          {}
-        drone_16/base_link:
-          {}
-        drone_17/base_link:
-          {}
-        drone_18/base_link:
-          {}
-        drone_19/base_link:
-          {}
-        drone_20/base_link:
-          {}
-        drone_21/base_link:
-          {}
-        drone_22/base_link:
-          {}
-        drone_23/base_link:
-          {}
-        drone_24/base_link:
-          {}
-        drone_25/base_link:
-          {}
-        drone_26/base_link:
-          {}
-        drone_27/base_link:
-          {}
-        drone_28/base_link:
-          {}
-        drone_29/base_link:
-          {}
-        drone_3/base_link:
-          {}
-        drone_30/base_link:
-          {}
-        drone_31/base_link:
-          {}
-        drone_32/base_link:
-          {}
-        drone_33/base_link:
-          {}
-        drone_4/base_link:
-          {}
-        drone_5/base_link:
-          {}
-        drone_6/base_link:
-          {}
-        drone_7/base_link:
-          {}
-        drone_8/base_link:
-          {}
-        drone_9/base_link:
-          {}
-        odom:
-          drone_0/base_link:
-            {}
-          drone_1/base_link:
-            {}
-          drone_2/base_link:
-            {}
-          human:
-            {}
-          map:
-            {}
+        {}
       Update Interval: 0
-      Value: true
+      Value: false
     - Alpha: 1
       Arrow Length: 0.30000001192092896
       Axes Length: 0.30000001192092896
@@ -251,8 +105,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 17.983020782470703
-        Min Value: 3.206364631652832
+        Max Value: 28.078067779541016
+        Min Value: -0.38190269470214844
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -288,39 +142,106 @@ Visualization Manager:
     - Alpha: 1
       Class: rviz/Axes
       Enabled: true
-      Length: 1
-      Name: drone0
-      Radius: 0.5
-      Reference Frame: drone_0/base_link
-      Show Trail: false
-      Value: true
-    - Alpha: 1
-      Class: rviz/Axes
-      Enabled: true
-      Length: 1
-      Name: drone1
-      Radius: 0.5
-      Reference Frame: drone_1/base_link
-      Show Trail: false
-      Value: true
-    - Alpha: 1
-      Class: rviz/Axes
-      Enabled: true
-      Length: 1
-      Name: drone2
-      Radius: 0.5
-      Reference Frame: drone_2/base_link
-      Show Trail: false
-      Value: true
-    - Alpha: 1
-      Class: rviz/Axes
-      Enabled: true
       Length: 5
       Name: human
       Radius: 1
       Reference Frame: human
       Show Trail: false
       Value: true
+    - Class: rviz/Group
+      Displays:
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone0
+          Radius: 0.5
+          Reference Frame: drone_0/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone1
+          Radius: 0.5
+          Reference Frame: drone_1/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone2
+          Radius: 0.5
+          Reference Frame: drone_2/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone3
+          Radius: 0.5
+          Reference Frame: drone_3/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone4
+          Radius: 0.5
+          Reference Frame: drone_4/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone5
+          Radius: 0.5
+          Reference Frame: drone_5/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone6
+          Radius: 0.5
+          Reference Frame: drone_6/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone7
+          Radius: 0.5
+          Reference Frame: drone_7/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone8
+          Radius: 0.5
+          Reference Frame: drone_8/base_link
+          Show Trail: false
+          Value: true
+        - Alpha: 1
+          Class: rviz/Axes
+          Enabled: true
+          Length: 1
+          Name: drone9
+          Radius: 0.5
+          Reference Frame: drone_9/base_link
+          Show Trail: false
+          Value: true
+      Enabled: true
+      Name: UAVs
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -348,7 +269,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: 0
+      Angle: -0.004999998956918716
       Class: rviz/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
@@ -358,10 +279,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 2.450378894805908
+      Scale: 6.9010009765625
       Target Frame: map
-      X: 11.69637393951416
-      Y: -33.55251693725586
+      X: -25.783161163330078
+      Y: -291.9571838378906
     Saved: ~
 Window Geometry:
   Displays:

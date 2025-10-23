@@ -1,6 +1,21 @@
 #!/bin/bash
 
-export UAV_NAMES="[drone_0, drone_1, drone_2]"
+if [ -z "$1" ]; then
+    echo "Usage: $0 <number_of_drones>"
+    exit 1
+fi
+
+N=$1
+
+# Generate UAV_NAMES automatically
+UAV_LIST=()
+for ((i=0; i<N; i++)); do
+    UAV_LIST+=("drone_$i")
+done
+
+# Join UAV_LIST into the desired export format: [drone_0, drone_1, ...]
+UAV_NAMES="[$(IFS=', '; echo "${UAV_LIST[*]}")]"
+export UAV_NAMES
 
 # Absolute path to launch files
 ROS_LAUNCH_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/../launch" && pwd)"
@@ -24,7 +39,7 @@ for UAV in "${UAV_NAMES_ARRAY[@]}"; do
     # Adjust argument name as per your .launch file
     gnome-terminal -- bash -c "roslaunch --wait $ROS_LAUNCH_PATH/swarm_followers_unity.launch UAV_NAME:=$UAV"
     
-    sleep 2  # short delay between launches to avoid race conditions
+    sleep 4  # short delay between launches to avoid race conditions
 done
 
 echo "All UAVs launched."
