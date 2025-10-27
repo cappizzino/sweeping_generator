@@ -6,7 +6,7 @@ import tf2_ros
 import tf2_geometry_msgs
 import math
 from mrs_msgs.msg import ControlManagerDiagnostics,Reference, ReferenceStamped
-from mrs_msgs.srv import PathSrv,PathSrvRequest
+from mrs_msgs.srv import PathSrv,PathSrvRequest, ReferenceStampedSrv, ReferenceStampedSrvRequest
 from mrs_msgs.srv import Vec1,Vec1Response
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, PoseArray
@@ -55,6 +55,9 @@ class Node:
         self.lateral_scale = rospy.get_param("~lateral_scale")
         self.side = rospy.get_param("~side")
 
+        self.octomap_planner_set = False
+        self.octomap_planner_set = rospy.get_param("~octomap_planner_set")
+
         if self.id != 0:
             if self.id % 2 == 0:
                 self.offset_sign = math.ceil(self.id/2)
@@ -86,6 +89,7 @@ class Node:
         ## | --------------------- service clients -------------------- |
         if self.leader_swarm:
             self.sc_path = rospy.ServiceProxy('~path_out', PathSrv)
+        self.sc_octomap_planner = rospy.ServiceProxy(f'/{self.uav_name}/octomap_planner/reference', ReferenceStampedSrv)
 
         ## | ------------------------- timers ------------------------- |
         if self.leader_swarm:
@@ -256,6 +260,28 @@ class Node:
 
         if not self.is_initialized:
             return Vec1Response(False, "not initialized")
+
+        if self.octomap_planner_set:
+            point = ReferenceStampedSrvRequest()
+            point.header.stamp = rospy.Time.now()
+            point.header.frame_id = self.frame_id
+            point.reference.position.x = self.center_x
+            point.reference.position.y = self.center_y
+            point.reference.position.z = self.center_z
+            point.reference.heading = 0.0
+
+            try:
+                response = self.sc_octomap_planner.call(point)
+            except:
+                rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
+                pass
+
+            if response.success:
+                rospy.loginfo('[SweepingGenerator]: octomap planner set')
+                return Vec1Response(True, "starting")
+            else:
+                rospy.loginfo('[SweepingGenerator]: octomap planner setting failed, message: {}'.format(response.message))
+                return Vec1Response(False, "octomap planner setting failed")
 
         # set the step size based on the service data
         step_size = req.goal
