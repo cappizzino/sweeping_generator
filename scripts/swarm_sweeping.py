@@ -327,16 +327,36 @@ class Node:
         target_y = y + dy_world
         target_z = z  # same altitude
 
-        # Publish reference
-        ref = ReferenceStamped()
-        ref.header.stamp = rospy.Time.now()
-        ref.header.frame_id = self.uav_name + "/" + self.frame_publish
-        ref.reference.position.x = target_x
-        ref.reference.position.y = target_y
-        ref.reference.position.z = target_z
-        ref.reference.heading = heading
+        if self.octomap_planner_set:
+            point = ReferenceStampedSrvRequest()
+            point.header.stamp = rospy.Time.now()
+            point.header.frame_id = self.uav_name + "/" + self.frame_publish
+            point.reference.position.x = target_x
+            point.reference.position.y = target_y
+            point.reference.position.z = target_z
+            point.reference.heading = heading
 
-        self.ref_pub.publish(ref)
+            try:
+                response = self.sc_octomap_planner.call(point)
+            except:
+                rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
+                pass
+
+            if response.success:
+                rospy.loginfo('[SweepingGenerator]: octomap planner set for follower')
+            else:
+                rospy.loginfo('[SweepingGenerator]: octomap planner setting failed for follower, message: {}'.format(response.message))
+        else:
+            # Publish reference
+            ref = ReferenceStamped()
+            ref.header.stamp = rospy.Time.now()
+            ref.header.frame_id = self.uav_name + "/" + self.frame_publish
+            ref.reference.position.x = target_x
+            ref.reference.position.y = target_y
+            ref.reference.position.z = target_z
+            ref.reference.heading = heading
+
+            self.ref_pub.publish(ref)
 
         # rospy.loginfo_throttle(1.0, f"[{self.uav_name}] following leader at ({target_x:.2f}, {target_y:.2f})")
     
