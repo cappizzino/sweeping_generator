@@ -9,6 +9,7 @@ import tf_conversions
 from tf.transformations import euler_from_quaternion
 from geometry_msgs.msg import PoseArray, Point
 from action_client.msg import GoToAction, GoToGoal
+from std_msgs.msg import Float32
 
 class Node:
 
@@ -54,9 +55,11 @@ class Node:
         self.r = self.side / numpy.sqrt(3.0)
         self.wing_index = math.ceil(self.id/2)
 
+        self.leader_index = 0
         self.heading = 0.0
         self.humanPose = Point()
         self.humanPoseInitial = Point()
+        self.first_time_getting_pose = True
         self.getting_initial_human_pose = True
 
         ## | ----------------------- TF listener ---------------------- |
@@ -65,6 +68,7 @@ class Node:
 
         ## | ----------------------- subscribers ---------------------- |
         self.sub_unity = rospy.Subscriber(f"/uav/{self.leader_name}/path_0/pose_array", PoseArray, self.callbackUnity)
+        self.sub_index = rospy.Subscriber(f"/uav/{self.leader_name}/path_0/point_index", Float32, self.callbackIndex)
 
         ## | --------------------- Action clients -------------------- |
         self.action_name = f"/uav/{self.uav_name}/action/GoTo"
@@ -72,7 +76,7 @@ class Node:
             self.action_name, GoToAction
         )
         rospy.loginfo(f"[{self.uav_name}] Waiting for GoTo action server...")
-        self.goto_client.wait_for_server(timeout=rospy.Duration(5.0))
+        # self.goto_client.wait_for_server(timeout=rospy.Duration(5.0))
 
         ## | ------------------------- timers ------------------------- |
         if self.leader_swarm:
@@ -104,6 +108,19 @@ class Node:
         self.sub_unity = msg
 
     # #} end of callbackUnity
+
+    # #{ callbackIndex():
+
+    def callbackIndex(self, msg):
+
+        if not self.is_initialized:
+            return
+
+        rospy.loginfo_once('[Swarm_Unity]: getting Index message')
+        self.leader_index = int(msg.data)
+        self.sub_index = msg
+
+    # #} end of callbackIndex
 
     ## | ------------------- Action callbacks ------------------- |
 
@@ -235,6 +252,7 @@ class Node:
 
         if isinstance(self.sub_unity, PoseArray):
 
+            rospy.loginfo_throttle(1.0, f"[{self.uav_name}] Leader index: {self.leader_index}")
             input_pose = Point()
             if self.index == 0:
                 i_mpc = 1
@@ -269,6 +287,15 @@ class Node:
             # Extract quaternion rotation
             q = transform.transform.rotation
             quaternion = [q.x, q.y, q.z, q.w]
+
+            if self.first_time_getting_pose:
+                self.first_time_getting_pose = False
+                input_pose = Point()
+                input_pose.x = transform.transform.translation.x
+                input_pose.y = transform.transform.translation.y
+                input_pose.z = transform.transform.translation.z
+                self.reference_follower(input_pose)
+                rospy.loginfo(f"[{self.uav_name}] First time getting leader pose.")
 
             # Convert quaternion to Euler angles
             (_, _, yaw) = euler_from_quaternion(quaternion)
