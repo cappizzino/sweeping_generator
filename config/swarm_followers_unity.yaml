@@ -13,3 +13,9 @@ timer_heading:
 index: 0
 side: 10.0
 human_distance_threshold: 20.0
+
+# Waypoint parameters
+timer_waypoint:
+  rate: 1.0 # [Hz]
+
+step_size: 40.0 # [m]

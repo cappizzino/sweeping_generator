@@ -52,4 +52,4 @@ for UAV in "${UAV_NAMES_ARRAY[@]}"; do
 done
 
 # WayPoint Navigation
-gnome-terminal -- bash -c "roslaunch --wait $ROS_LAUNCH_PATH/swarm_waypoint_unity.launch"
+# gnome-terminal -- bash -c "roslaunch --wait $ROS_LAUNCH_PATH/swarm_waypoint_unity.launch"

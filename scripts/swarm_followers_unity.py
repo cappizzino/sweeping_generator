@@ -22,15 +22,17 @@ class Node:
         ## | --------------------- load parameters -------------------- |
         self.uav_name = rospy.get_param("~uav_name", "uav1")
         self.drone_list = rospy.get_param('~uav_names', [])
-        self.computer_name = rospy.get_param("~computer_name", "computer1")
         self.human_name = rospy.get_param("~human_name", "human")
 
+        # Determine leader name
         self.leader_name = self.drone_list[0]
 
+        # Check if this UAV is the leader
         self.leader_swarm = False
         if self.uav_name == self.leader_name:
             self.leader_swarm = True
-        
+
+        # Determine UAV ID
         self.id = 0
         for name in self.drone_list:
             if name == self.uav_name: break
