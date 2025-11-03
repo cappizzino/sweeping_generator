@@ -50,6 +50,12 @@ class Node:
 
         self.timer_main_rate = rospy.get_param("~timer_main/rate")
         self.timer_pose_rate = rospy.get_param("~timer_pose/rate")
+        self.timer_comm_rate = rospy.get_param("~timer_comm/rate")
+        self.timeout_comm = rospy.get_param("~timer_comm/timeout")
+
+        self.is_comm_initialized = False
+        self.timeout_counter = 0
+        self.timeout_limit = int(self.timeout_comm / (1.0 / self.timer_comm_rate))
 
         self.angle = rospy.get_param("~angle")
         self.lateral_scale = rospy.get_param("~lateral_scale")
@@ -65,6 +71,12 @@ class Node:
                 self.offset_sign = -math.ceil(self.id/2)
         self.r = self.side / numpy.sqrt(3.0)
         self.wing_index = math.ceil(self.id/2)
+
+        self.follower_path = rospy.get_param("~follower_path", "line")
+
+        self.has_goal = False
+        self.waypoint_list = rospy.get_param('~waypoint_list', [])
+        self.waypoint_count = len(self.waypoint_list)
 
         rospy.loginfo('[SweepingGenerator]: initialized')
 
@@ -95,6 +107,8 @@ class Node:
         if self.leader_swarm:
             self.timer_main = rospy.Timer(rospy.Duration(1.0/self.timer_main_rate), self.timerMain)
             self.timer_pose = rospy.Timer(rospy.Duration(1.0/self.timer_pose_rate), self.timerPose)
+        else:
+            self.timer_comm = rospy.Timer(rospy.Duration(1.0/self.timer_comm_rate), self.timerComm)
 
         ## | -------------------- spin till the end ------------------- |
 
@@ -262,19 +276,28 @@ class Node:
             return Vec1Response(False, "not initialized")
 
         if self.octomap_planner_set:
-            point = ReferenceStampedSrvRequest()
-            point.header.stamp = rospy.Time.now()
-            point.header.frame_id = self.frame_id
-            point.reference.position.x = self.center_x
-            point.reference.position.y = self.center_y
-            point.reference.position.z = self.center_z
-            point.reference.heading = 0.0
 
-            try:
-                response = self.sc_octomap_planner.call(point)
-            except:
-                rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
-                pass
+            for waypoint in self.waypoint_list:
+                rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
+
+                point = ReferenceStampedSrvRequest()
+                point.header.stamp = rospy.Time.now()
+                point.header.frame_id = self.uav_name + "/" + self.frame_id
+                point.reference.position.x = waypoint[0]
+                point.reference.position.y = waypoint[1]
+                point.reference.position.z = waypoint[2]
+                point.reference.heading = 0.0
+
+                try:
+                    response = self.sc_octomap_planner.call(point)
+                    rospy.sleep(1.0)
+                except:
+                    rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
+                    pass
+
+                while self.has_goal and not rospy.is_shutdown():
+                    rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
+                    rospy.sleep(0.1)
 
             if response.success:
                 rospy.loginfo('[SweepingGenerator]: octomap planner set')
@@ -306,6 +329,13 @@ class Node:
     # #{ reference_cb():
 
     def reference_cb(self, msg):
+
+        # communication initialized
+        self.is_comm_initialized = True
+
+        # Reset timeout counter
+        self.timeout_counter = 0
+
         # Extract leader state
         x = msg.position.x
         y = msg.position.y
@@ -314,13 +344,23 @@ class Node:
         # Extract leader heading (yaw)
         heading = msg.heading
 
-        # Compute follower offset in leader frame
-        dx_body = -self.r * self.wing_index
-        dy_body = self.offset_sign * (self.side / 2.0)
+        if self.follower_path == "v_formation":
+            # Compute follower offset in leader frame
+            dx_body = -self.r * self.wing_index
+            dy_body = self.offset_sign * (self.side / 2.0)
 
-        # Rotate offset to world frame
-        dx_world = dx_body * numpy.cos(heading) - dy_body * numpy.sin(heading)
-        dy_world = dx_body * numpy.sin(heading) + dy_body * numpy.cos(heading)
+            # Rotate offset to world frame
+            dx_world = dx_body * numpy.cos(heading) - dy_body * numpy.sin(heading)
+            dy_world = dx_body * numpy.sin(heading) + dy_body * numpy.cos(heading)
+
+        else:
+            # Compute follower offset in leader frame
+            dx_body = 0.0
+            dy_body = self.offset_sign * self.side
+
+            # Rotate offset to world frame
+            dx_world = dx_body * numpy.cos(heading) - dy_body * numpy.sin(heading)
+            dy_world = dx_body * numpy.sin(heading) + dy_body * numpy.cos(heading)
 
         # Compute follower desired position
         target_x = x + dx_world
@@ -375,8 +415,10 @@ class Node:
 
         if isinstance(self.sub_control_manager_diag, ControlManagerDiagnostics):
             if self.sub_control_manager_diag.tracker_status.have_goal:
+                self.has_goal = True
                 rospy.loginfo('[SweepingGenerator]: tracker has goal')
             else:
+                self.has_goal = False
                 rospy.loginfo('[SweepingGenerator]: waiting for command')
 
     # #} end of timerMain()
@@ -427,6 +469,7 @@ class Node:
                 input_pose.header.stamp = rospy.Time(0)
                 input_pose.header.frame_id = self.sub_mpc.header.frame_id
                 i_mpc = int(len(self.sub_mpc.poses)/4)
+                rospy.loginfo(f"[SweepingGenerator]: using MPC pose index {i_mpc} out of {len(self.sub_mpc.poses)}")
                 input_pose.pose = self.sub_mpc.poses[i_mpc]
                 target_frame = self.leader_name + "/" + self.frame_publish
                 transformed_pose = self.transform_pose(input_pose, target_frame)
@@ -452,7 +495,27 @@ class Node:
         else:
             rospy.logwarn("No messages from leader.")
 
-    # #} end of timerMain()
+    # #} end of timerPose()
+
+    # #{ timerComm()
+
+    def timerComm(self, event=None):
+
+        if not self.is_initialized:
+            return
+
+        rospy.loginfo_once('[SweepingGenerator]: comm timer spinning')
+
+        if not self.is_comm_initialized:
+            return
+
+        rospy.loginfo_once('[SweepingGenerator]: communication with leader established')
+
+        if self.timeout_counter == self.timeout_limit:
+            rospy.logwarn('[SweepingGenerator]: no messages from leader detected yet')
+
+        self.timeout_counter += 1
+    # #} end of timerComm()
 
     def transform_pose(self, input_pose, target_frame):
         """Transforms a PoseStamped to the target_frame using TF2."""
@@ -465,10 +528,10 @@ class Node:
             tf_buffer.can_transform(target_frame, 
                                     input_pose.header.frame_id, 
                                     rospy.Time(0), 
-                                    rospy.Duration(3.0))
+                                    rospy.Duration(5.0))
             
             # Perform the transformation
-            output_pose = tf_buffer.transform(input_pose, target_frame)
+            output_pose = tf_buffer.transform(input_pose, target_frame, rospy.Duration(5.0))
             return output_pose
 
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
