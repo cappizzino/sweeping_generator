@@ -1,23 +1,29 @@
 frame_id: "world_origin"
 
 leader_msg: "mpc"
-frame_publish: "utm_origin"
+frame_publish: "utm_navsat"
 
 timer_main:
-  rate: 2.0 # [Hz]
+  rate: 1.0 # [Hz]
 
 timer_pose:
-  rate: 2.0 # [Hz]
+  rate: 1.0 # [Hz]
+
+timer_comm:
+  rate: 1.0 # [Hz]
+  timeout: 5.0 # [s]
 
 center:
-  x: 5.0 # [m]
-  y: 5.0 # [m]
-  z: 2.0 # [m]
+  x: 0.0 # [m]
+  y: 0.0 # [m]
+  z: 5.0 # [m]
 
 dimensions:
-  x: 80.0 # [m]
-  y: 80.0 # [m]
+  x: 150.0 # [m]
+  y: 150.0 # [m]
 
 angle: 0.0
 lateral_scale: 1.0
 side: 6.0
+
+octomap_planner_set: true

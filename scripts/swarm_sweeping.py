@@ -5,6 +5,7 @@ import numpy
 import tf2_ros
 import tf2_geometry_msgs
 import math
+import utm
 from mrs_msgs.msg import ControlManagerDiagnostics,Reference, ReferenceStamped
 from mrs_msgs.srv import PathSrv,PathSrvRequest, ReferenceStampedSrv, ReferenceStampedSrvRequest
 from mrs_msgs.srv import Vec1,Vec1Response
@@ -18,6 +19,7 @@ class Node:
     def __init__(self):
 
         rospy.init_node("sweeping_generator", anonymous=True)
+        self.is_initialized = False
 
         ## | --------------------- load parameters -------------------- |
         self.uav_name = rospy.get_param("~uav_name", "uav1")
@@ -77,6 +79,13 @@ class Node:
         self.has_goal = False
         self.waypoint_list = rospy.get_param('~waypoint_list', [])
         self.waypoint_count = len(self.waypoint_list)
+        self.waypoint_frame = rospy.get_param('~waypoint_frame', "world_origin")
+
+        self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(60.0))
+        self.listener = tf2_ros.TransformListener(self.tf_buffer)
+
+        self.main_count_max = rospy.get_param('~main_count_max', 5)
+        self.main_count = 0
 
         rospy.loginfo('[SweepingGenerator]: initialized')
 
@@ -280,6 +289,11 @@ class Node:
             for waypoint in self.waypoint_list:
                 rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
 
+                if self.waypoint_frame == "utm_navsat" or self.waypoint_frame == "utm_origin":
+                    waypoint = self.latlon_to_utm(waypoint[0], waypoint[1], waypoint[2])
+                    rospy.loginfo('[SweepingGenerator]: UTM waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
+                    self.frame_id = self.waypoint_frame
+
                 point = ReferenceStampedSrvRequest()
                 point.header.stamp = rospy.Time.now()
                 point.header.frame_id = self.uav_name + "/" + self.frame_id
@@ -290,7 +304,9 @@ class Node:
 
                 try:
                     response = self.sc_octomap_planner.call(point)
-                    rospy.sleep(1.0)
+                    self.main_count = 0
+                    while not self.has_goal and self.main_count < self.main_count_max:
+                        rospy.sleep(0.1)
                 except:
                     rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
                     pass
@@ -420,6 +436,9 @@ class Node:
             else:
                 self.has_goal = False
                 rospy.loginfo('[SweepingGenerator]: waiting for command')
+        
+        self.main_count += 1
+        # rospy.loginfo('[SweepingGenerator]: Flag: {}'.format(self.main_count))
 
     # #} end of timerMain()
 
@@ -471,6 +490,7 @@ class Node:
                 i_mpc = int(len(self.sub_mpc.poses)/4)
                 rospy.loginfo(f"[SweepingGenerator]: using MPC pose index {i_mpc} out of {len(self.sub_mpc.poses)}")
                 input_pose.pose = self.sub_mpc.poses[i_mpc]
+                rospy.loginfo(f"[SweepingGenerator]: leader at ({input_pose.pose.position.x:.2f}, {input_pose.pose.position.y:.2f}, {input_pose.pose.position.z:.2f})")
                 target_frame = self.leader_name + "/" + self.frame_publish
                 transformed_pose = self.transform_pose(input_pose, target_frame)
 
@@ -520,18 +540,15 @@ class Node:
     def transform_pose(self, input_pose, target_frame):
         """Transforms a PoseStamped to the target_frame using TF2."""
         try:
-            # Initialize the TF2 buffer and listener
-            tf_buffer = tf2_ros.Buffer()
-            listener = tf2_ros.TransformListener(tf_buffer)
 
             # Wait for the transform to become available
-            tf_buffer.can_transform(target_frame, 
-                                    input_pose.header.frame_id, 
-                                    rospy.Time(0), 
-                                    rospy.Duration(5.0))
+            self.tf_buffer.can_transform(target_frame, 
+                                        input_pose.header.frame_id, 
+                                        rospy.Time(0),
+                                        rospy.Duration(5.0))
             
             # Perform the transformation
-            output_pose = tf_buffer.transform(input_pose, target_frame, rospy.Duration(5.0))
+            output_pose = self.tf_buffer.transform(input_pose, target_frame, rospy.Duration(5.0))
             return output_pose
 
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
@@ -543,6 +560,11 @@ class Node:
             x * numpy.cos(theta) - y * numpy.sin(theta),
             x * numpy.sin(theta) + y * numpy.cos(theta)
         )
+
+    def latlon_to_utm(self, lat, lon, alt=0.0):
+        """Convert latitude and longitude to UTM coordinates."""
+        u = utm.from_latlon(lat, lon)
+        return u[0], u[1], alt  # x, y, z
 
 if __name__ == '__main__':
     try:
