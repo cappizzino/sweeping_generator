@@ -78,7 +78,7 @@ class Node:
 
         self.has_goal = False
         self.waypoint_list = rospy.get_param('~waypoint_list', [])
-        self.waypoint_count = len(self.waypoint_list)
+        self.waypoint_count = 0
         self.waypoint_frame = rospy.get_param('~waypoint_frame', "world_origin")
 
         self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(60.0))
@@ -92,10 +92,11 @@ class Node:
         ## | ----------------------- subscribers ---------------------- |
         if self.leader_swarm:
             self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
-            self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
+            # self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
             self.sub_mpc = rospy.Subscriber(f"/{self.uav_name}/control_manager/mpc_tracker/predicted_trajectory_debugging", PoseArray, self.callbackMPC)
         else:
             self.sub_reference = rospy.Subscriber(f"/{self.leader_name}/leader_reference", Reference, self.reference_cb)
+        self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
 
         ## | ----------------------- publishers ---------------------- |
         if self.leader_swarm:
@@ -294,16 +295,41 @@ class Node:
                     rospy.loginfo('[SweepingGenerator]: UTM waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
                     self.frame_id = self.waypoint_frame
 
+                    input_pose = PoseStamped()
+                    input_pose.header.stamp = rospy.Time(0)
+                    input_pose.header.frame_id = self.sub_odom.header.frame_id
+                    input_pose.pose = self.sub_odom.pose.pose
+                    target_frame = self.leader_name + "/" + self.frame_publish
+                    transformed_pose = self.transform_pose(input_pose, target_frame)
+
+                    if transformed_pose:
+                        prev_x = transformed_pose.pose.position.x
+                        prev_y = transformed_pose.pose.position.y
+                    else: 
+                        prev_x, prev_y = None, None
+                else:
+                    prev_x = self.sub_odom.pose.pose.position.x
+                    prev_y = self.sub_odom.pose.pose.position.y
+
+                # Compute heading along the rotated path
+                if prev_x is not None:
+                    dx = waypoint[0] - prev_x
+                    dy = waypoint[1] - prev_y
+                    heading = numpy.arctan2(dy, dx)
+                else:
+                    heading = 0.0
+
                 point = ReferenceStampedSrvRequest()
                 point.header.stamp = rospy.Time.now()
                 point.header.frame_id = self.uav_name + "/" + self.frame_id
                 point.reference.position.x = waypoint[0]
                 point.reference.position.y = waypoint[1]
                 point.reference.position.z = waypoint[2]
-                point.reference.heading = 0.0
+                point.reference.heading = heading
 
                 try:
                     response = self.sc_octomap_planner.call(point)
+                    self.waypoint_count += 1
                     self.main_count = 0
                     while not self.has_goal and self.main_count < self.main_count_max:
                         rospy.sleep(0.1)
@@ -314,6 +340,8 @@ class Node:
                 while self.has_goal and not rospy.is_shutdown():
                     rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
                     rospy.sleep(0.1)
+
+            self.waypoint_count = 0
 
             if response.success:
                 rospy.loginfo('[SweepingGenerator]: octomap planner set')
@@ -508,7 +536,8 @@ class Node:
                     leader_point.heading = numpy.arctan2(siny_cosp, cosy_cosp)
 
                     # rospy.loginfo(f"Leader at ({leader_point.position.x:.2f}, {leader_point.position.y:.2f}, {leader_point.position.z:.2f}, {leader_point.heading:.2f})")
-                    self.ref_pub.publish(leader_point)
+                    if self.waypoint_count != 0:
+                        self.ref_pub.publish(leader_point)
                 else:
                     rospy.logwarn("Transformation failed.")
         
