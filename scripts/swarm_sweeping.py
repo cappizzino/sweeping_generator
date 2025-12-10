@@ -7,10 +7,13 @@ import tf2_geometry_msgs
 import math
 import utm
 from mrs_msgs.msg import ControlManagerDiagnostics,Reference, ReferenceStamped
+from mrs_modules_msgs.msg import OctomapPlannerDiagnostics
 from mrs_msgs.srv import PathSrv,PathSrvRequest, ReferenceStampedSrv, ReferenceStampedSrvRequest
 from mrs_msgs.srv import Vec1,Vec1Response
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, PoseArray
+from std_msgs.msg import UInt8
+from std_srvs.srv import Trigger
 
 class Node:
 
@@ -56,6 +59,7 @@ class Node:
         self.timeout_comm = rospy.get_param("~timer_comm/timeout")
 
         self.is_comm_initialized = False
+        self.leader_lost = False
         self.timeout_counter = 0
         self.timeout_limit = int(self.timeout_comm / (1.0 / self.timer_comm_rate))
 
@@ -63,8 +67,9 @@ class Node:
         self.lateral_scale = rospy.get_param("~lateral_scale")
         self.side = rospy.get_param("~side")
 
-        self.octomap_planner_set = False
-        self.octomap_planner_set = rospy.get_param("~octomap_planner_set")
+        self.octomap_planner_set = rospy.get_param("~octomap_planner_set", True)
+        self.leader_reference_set = rospy.get_param("~leader_reference_set", False)
+        self.heading_leader_zero = rospy.get_param("~heading_leader_zero", False)
 
         if self.id != 0:
             if self.id % 2 == 0:
@@ -78,8 +83,17 @@ class Node:
 
         self.has_goal = False
         self.waypoint_list = rospy.get_param('~waypoint_list', [])
+        self.offset_waypoint_utm = []
         self.waypoint_count = 0
         self.waypoint_frame = rospy.get_param('~waypoint_frame', "world_origin")
+
+        if self.leader_swarm == False:
+            waypoint_utm = []
+            if self.octomap_planner_set:
+                for waypoint in self.waypoint_list:
+                    wp = self.latlon_to_utm(waypoint[0], waypoint[1], waypoint[2])
+                    waypoint_utm.append(wp)
+                self.offset_waypoint_utm = self.offset_utm_path(waypoint_utm, -self.offset_sign * self.side)
 
         self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(60.0))
         self.listener = tf2_ros.TransformListener(self.tf_buffer)
@@ -91,16 +105,22 @@ class Node:
 
         ## | ----------------------- subscribers ---------------------- |
         if self.leader_swarm:
-            self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
+            # self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
             # self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
             self.sub_mpc = rospy.Subscriber(f"/{self.uav_name}/control_manager/mpc_tracker/predicted_trajectory_debugging", PoseArray, self.callbackMPC)
         else:
-            self.sub_reference = rospy.Subscriber(f"/{self.leader_name}/leader_reference", Reference, self.reference_cb)
+            if self.leader_reference_set == True:
+                self.sub_reference = rospy.Subscriber(f"/{self.leader_name}/leader_reference", Reference, self.reference_cb)
+            else:
+                self.sub_index = rospy.Subscriber(f"/{self.leader_name}/leader_index", UInt8, self.index_cb)
         self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
+        self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
+        self.sub_octomap_planner_diag = rospy.Subscriber("~octomap_planner_diag_in", OctomapPlannerDiagnostics, self.callbackOctomapPlannerDiagnostics)
 
         ## | ----------------------- publishers ---------------------- |
         if self.leader_swarm:
             self.ref_pub = rospy.Publisher(f"/{self.uav_name}/leader_reference", Reference, queue_size=1)
+            self.index_pub = rospy.Publisher(f"/{self.uav_name}/leader_index", UInt8, queue_size=1)
         else:
             self.ref_pub = rospy.Publisher(f"/{self.uav_name}/control_manager/reference", ReferenceStamped, queue_size=1)
 
@@ -112,17 +132,23 @@ class Node:
         if self.leader_swarm:
             self.sc_path = rospy.ServiceProxy('~path_out', PathSrv)
         self.sc_octomap_planner = rospy.ServiceProxy(f'/{self.uav_name}/octomap_planner/reference', ReferenceStampedSrv)
+        self.sc_octomap_planner_stop = rospy.ServiceProxy(f'/{self.uav_name}/octomap_planner/stop', Trigger)
 
         ## | ------------------------- timers ------------------------- |
         if self.leader_swarm:
             self.timer_main = rospy.Timer(rospy.Duration(1.0/self.timer_main_rate), self.timerMain)
             self.timer_pose = rospy.Timer(rospy.Duration(1.0/self.timer_pose_rate), self.timerPose)
+            self.timer_index = rospy.Timer(rospy.Duration(1.0/self.timer_pose_rate), self.timerIndex)
         else:
             self.timer_comm = rospy.Timer(rospy.Duration(1.0/self.timer_comm_rate), self.timerComm)
 
         ## | -------------------- spin till the end ------------------- |
 
         self.is_initialized = True
+
+        if not self.leader_swarm and self.octomap_planner_set and self.leader_reference_set == False:
+            self.index = None
+            self.main_follower()
 
         rospy.spin()
 
@@ -252,6 +278,19 @@ class Node:
 
     # #} end of callbackControlManagerDiagnostics
 
+    # #{ callbackOctomapPlannerDiagnostics():
+
+    def callbackOctomapPlannerDiagnostics(self, msg):
+
+        if not self.is_initialized:
+            return
+
+        rospy.loginfo_once('[SweepingGenerator]: getting OctomapPlanner diagnostics')
+
+        self.sub_octomap_planner_diag = msg
+
+    # #} end of callbackOctomapPlannerDiagnostics
+
     # #{ callbackOdom():
 
     def callbackOdom(self, msg):
@@ -312,12 +351,14 @@ class Node:
                     prev_y = self.sub_odom.pose.pose.position.y
 
                 # Compute heading along the rotated path
-                if prev_x is not None:
+                if prev_x is not None and self.heading_leader_zero == False:
                     dx = waypoint[0] - prev_x
                     dy = waypoint[1] - prev_y
                     heading = numpy.arctan2(dy, dx)
                 else:
                     heading = 0.0
+
+                rospy.loginfo('[SweepingGenerator]: waypoint heading: {}'.format(heading))
 
                 point = ReferenceStampedSrvRequest()
                 point.header.stamp = rospy.Time.now()
@@ -337,9 +378,10 @@ class Node:
                     rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
                     pass
 
-                while self.has_goal and not rospy.is_shutdown():
+                while not self.idle and not rospy.is_shutdown():
                     rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
                     rospy.sleep(0.1)
+                rospy.sleep(0.5)
 
             self.waypoint_count = 0
 
@@ -444,7 +486,25 @@ class Node:
 
         # rospy.loginfo_throttle(1.0, f"[{self.uav_name}] following leader at ({target_x:.2f}, {target_y:.2f})")
     
-    # #} end of callbackStart
+    # #} end of reference_cb()
+
+    # #{ index_cb():
+
+    def index_cb(self, msg):
+
+        # communication initialized
+        self.is_comm_initialized = True
+
+        # Leader lost flag reset
+        self.leader_lost = False
+
+        # Reset timeout counter
+        self.timeout_counter = 0
+
+        # Index of the leader waypoint
+        self.index = msg.data - 1
+
+        rospy.loginfo_once('[SweepingGenerator]: getting leader index message: {}'.format(self.index))
 
     ## | ------------------------- timers ------------------------- |
 
@@ -464,6 +524,14 @@ class Node:
             else:
                 self.has_goal = False
                 rospy.loginfo('[SweepingGenerator]: waiting for command')
+
+        if isinstance(self.sub_octomap_planner_diag, OctomapPlannerDiagnostics):
+            if self.sub_octomap_planner_diag.idle:
+                self.idle = True
+                rospy.loginfo('[SweepingGenerator]: Octomap planner is idle.')
+            else:
+                self.idle = False
+                rospy.loginfo('[SweepingGenerator]: Octomap planner is not idle.')
         
         self.main_count += 1
         # rospy.loginfo('[SweepingGenerator]: Flag: {}'.format(self.main_count))
@@ -546,6 +614,21 @@ class Node:
 
     # #} end of timerPose()
 
+    # #{ timerIndex()
+
+    def timerIndex(self, event=None):
+
+        if not self.is_initialized:
+            return
+
+        rospy.loginfo_once('[SweepingGenerator]: index timer spinning')
+
+        if self.waypoint_count == 0:
+            return
+        self.index_pub.publish(self.waypoint_count)
+
+    # #} end of timerIndex()
+
     # #{ timerComm()
 
     def timerComm(self, event=None):
@@ -560,11 +643,60 @@ class Node:
 
         rospy.loginfo_once('[SweepingGenerator]: communication with leader established')
 
-        if self.timeout_counter == self.timeout_limit:
+        if isinstance(self.sub_control_manager_diag, ControlManagerDiagnostics):
+            if self.sub_control_manager_diag.tracker_status.have_goal:
+                self.has_goal = True
+            else:
+                self.has_goal = False
+
+        if self.timeout_counter >= self.timeout_limit and not self.leader_lost:
             rospy.logwarn('[SweepingGenerator]: no messages from leader detected yet')
+            self.leader_lost = True
 
         self.timeout_counter += 1
+
     # #} end of timerComm()
+
+    def main_follower(self):
+
+        if not self.is_initialized:
+            return
+
+        while not rospy.is_shutdown():
+
+            if self.index is None:
+                rospy.sleep(0.1)
+                continue
+
+            if self.leader_lost:
+                self.index += 1
+                rospy.loginfo('[SweepingGenerator]: leader lost, moving to next waypoint index: {}'.format(self.index))
+
+            point = ReferenceStampedSrvRequest()
+            point.header.stamp = rospy.Time.now()
+            point.header.frame_id = self.uav_name + "/" + self.frame_publish
+            point.reference.position.x = self.offset_waypoint_utm[self.index][0]
+            point.reference.position.y = self.offset_waypoint_utm[self.index][1]
+            point.reference.position.z = self.offset_waypoint_utm[self.index][2]
+            point.reference.heading = 0.0
+
+            try:
+                response = self.sc_octomap_planner.call(point)
+                while not self.has_goal:
+                    rospy.sleep(0.1)
+            except:
+                rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
+                pass
+
+            index = self.index
+            while index == self.index and not rospy.is_shutdown():
+                rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
+                rospy.sleep(0.1)
+
+            if self.index >= len(self.offset_waypoint_utm):
+                rospy.loginfo('[SweepingGenerator]: follower completed all waypoints, restarting from beginning')
+                self.index = 0
+                break
 
     def transform_pose(self, input_pose, target_frame):
         """Transforms a PoseStamped to the target_frame using TF2."""
@@ -594,6 +726,54 @@ class Node:
         """Convert latitude and longitude to UTM coordinates."""
         u = utm.from_latlon(lat, lon)
         return u[0], u[1], alt  # x, y, z
+
+    def offset_utm_path(self, original_waypoint, side):
+        """
+        original_waypoint: list of waypoints
+        side: float → offset distance in meters (+left, -right)
+
+        returns: new list of offset UTM points
+        """
+
+        offset_points = []
+
+        for i in range(len(original_waypoint)):
+            # Get current point
+            x0, y0 = original_waypoint[i][0], original_waypoint[i][1]
+
+            # Determine direction vector
+            if i < len(original_waypoint) - 1:
+                x1, y1 = original_waypoint[i+1][0], original_waypoint[i+1][1]
+            else:
+                # Last point: use previous direction
+                x1, y1 = original_waypoint[i-1][0], original_waypoint[i-1][1]
+
+            # Direction vector
+            dx = x1 - x0
+            dy = y1 - y0
+            length = math.sqrt(dx*dx + dy*dy)
+
+            if length == 0:
+                rospy.logwarn("Degenerate point detected.")
+                offset_points.append((x0, y0, original_waypoint[i][2]))  # keep original z
+                continue
+
+            # Normalize direction
+            dx /= length
+            dy /= length
+
+            # Perpendicular vector (rotate 90° CCW)
+            nx = -dy
+            ny = dx
+
+            # Apply side offset
+            ox = x0 + nx * side
+            oy = y0 + ny * side
+
+            rospy.loginfo(f"Original: ({x0}, {y0}), Offset: ({ox}, {oy}), Side: {side}")
+            offset_points.append((ox, oy, original_waypoint[i][2]))  # keep original z
+
+        return offset_points
 
 if __name__ == '__main__':
     try:
