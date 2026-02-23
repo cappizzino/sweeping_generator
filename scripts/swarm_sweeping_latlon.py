@@ -99,7 +99,7 @@ class Node:
         self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(60.0))
         self.listener = tf2_ros.TransformListener(self.tf_buffer)
 
-        self.main_count_max = rospy.get_param('~main_count_max', 5)
+        self.main_count_max = rospy.get_param('~main_count_max', 20)
         self.main_count = 0
 
         rospy.loginfo('[SweepingGenerator]: initialized')
@@ -379,7 +379,7 @@ class Node:
                 # while not self.idle and not rospy.is_shutdown():
                 #     rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
                 #     rospy.sleep(0.1)
-                rospy.sleep(0.5)
+                rospy.sleep(20.0)
 
             self.waypoint_count = 0
 
