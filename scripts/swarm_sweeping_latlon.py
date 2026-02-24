@@ -15,6 +15,7 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, PoseArray
 from std_msgs.msg import UInt8
 from std_srvs.srv import Trigger
+from waypoints_latlog import SwarmInputs, compute_swarm_waypoint_lines
 
 class Node:
 
@@ -83,7 +84,34 @@ class Node:
         self.follower_path = rospy.get_param("~follower_path", "line")
 
         self.has_goal = False
-        self.waypoint_list = rospy.get_param('~waypoint_list', [])
+
+        # self.waypoint_list = rospy.get_param('~waypoint_list', [])
+        self.waypoint_list = []
+
+        self.offset_waypoint_utm_flag = rospy.get_param('~offset_waypoint_utm_flag', True)
+        self.automated_calculation = rospy.get_param('~automated_calculation', False)
+
+        if self.automated_calculation:
+            inp = SwarmInputs(
+                lat_start=rospy.get_param("~lat_start", 41.2209406896861),
+                lon_start=rospy.get_param("~lon_start", -8.527200278531424),
+                lat_end=rospy.get_param("~lat_end", 41.22115148976369),
+                lon_end=rospy.get_param("~lon_end", -8.527152346726584),
+                drones=self.drone_list,
+                distance_between_drones=rospy.get_param("~distance_between_drones", 3.0),
+                distance_line=rospy.get_param("~distance_line", 10.0),
+                altitude=rospy.get_param("~altitude", 5.0)
+            )
+            lines = compute_swarm_waypoint_lines(inp)
+
+            # Output format 1: (num_lines) x (num_drones)
+            print("Lines (line_index -> list of (lat,lon,alt) per drone in input order):")
+            for j, line in enumerate(lines):
+                print(f"  line {j}: {line[self.id]}")
+                self.waypoint_list.append(line[self.id])  # add waypoint of this drone to the list
+        else:
+            self.waypoint_list = rospy.get_param('~waypoint_list', [])
+
         self.offset_waypoint_utm = []
         self.waypoint_count = 0
         self.waypoint_frame = rospy.get_param('~waypoint_frame', "world_origin")
@@ -647,11 +675,14 @@ class Node:
             else:
                 self.has_goal = False
 
+        rospy.loginfo('[SweepingGenerator]: self.timeout_counter: {}'.format(self.timeout_counter))
+
         if self.timeout_counter >= self.timeout_limit and not self.leader_lost:
             rospy.logwarn('[SweepingGenerator]: no messages from leader detected yet')
             self.leader_lost = True
-
-        self.timeout_counter += 1
+        
+        if not self.leader_lost:
+            self.timeout_counter += 1
 
     # #} end of timerComm()
 
@@ -670,28 +701,75 @@ class Node:
                 self.index += 1
                 rospy.loginfo('[SweepingGenerator]: leader lost, moving to next waypoint index: {}'.format(self.index))
 
-            point = ReferenceStampedSrvRequest()
-            point.header.stamp = rospy.Time.now()
-            point.header.frame_id = self.uav_name + "/" + self.frame_publish
-            point.reference.position.x = self.offset_waypoint_utm[self.index][0]
-            point.reference.position.y = self.offset_waypoint_utm[self.index][1]
-            point.reference.position.z = self.offset_waypoint_utm[self.index][2]
-            point.reference.heading = 0.0
+            if self.offset_waypoint_utm_flag and self.index < len(self.offset_waypoint_utm):
+                point = ReferenceStampedSrvRequest()
+                point.header.stamp = rospy.Time.now()
+                point.header.frame_id = self.uav_name + "/" + self.frame_publish
+                point.reference.position.x = self.offset_waypoint_utm[self.index][0]
+                point.reference.position.y = self.offset_waypoint_utm[self.index][1]
+                point.reference.position.z = self.offset_waypoint_utm[self.index][2]
+                point.reference.heading = 0.0
 
-            try:
-                response = self.sc_octomap_planner.call(point)
-                while not self.has_goal:
-                    rospy.sleep(0.1)
-            except:
-                rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
-                pass
+                try:
+                    response = self.sc_octomap_planner.call(point)
+                    while not self.has_goal:
+                        rospy.sleep(0.1)
+                except:
+                    rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
+                    pass
+            
+            if not self.offset_waypoint_utm_flag and self.index < len(self.waypoint_list):
+                waypoint = self.waypoint_list[self.index]
+
+                rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
+
+                ref = ReferenceStamped()
+                ref.header.frame_id = "latlon_origin"
+                ref.reference.position.x = waypoint[0]
+                ref.reference.position.y = waypoint[1]
+                ref.reference.position.z = 0.0
+                ref.reference.heading = 0.0
+
+                request = TransformReferenceSrvRequest()
+                request.frame_id = self.uav_name + "/" + "world_origin"
+                request.reference = ref
+
+                try:
+                    response = self.sc_transform(request)
+                    rospy.loginfo(f"Response: success={response.success}, message='{response.message}'")
+                    # rospy.loginfo(f"Transformed Reference: x={response.reference.reference.position.x}, y={response.reference.reference.position.y}")
+                except rospy.ServiceException as e:
+                    rospy.logerr(f"Service call failed: {e}")
+                    pass
+
+                point = ReferenceStampedSrvRequest()
+                point.header.stamp = rospy.Time.now()
+                point.header.frame_id = self.uav_name + "/" + "world_origin"
+                point.reference.position.x = response.reference.reference.position.x
+                point.reference.position.y = response.reference.reference.position.y
+                point.reference.position.z = waypoint[2]
+                point.reference.heading = 0.0
+
+                rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
+
+                try:
+                    response = self.sc_octomap_planner.call(point)
+                    rospy.loginfo(f"Response: success={response.success}, message='{response.message}'")
+                    # while not self.has_goal:
+                    #     rospy.sleep(0.1)
+                except:
+                    rospy.logerr('[SweepingGenerator]: octomap planner setting failed, message: {}'.format(response.message))
+                    pass
+
+                if self.leader_lost:
+                    rospy.sleep(20.0)
 
             index = self.index
-            while index == self.index and not rospy.is_shutdown():
+            while index == self.index and not self.leader_lost and not rospy.is_shutdown():
                 rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
                 rospy.sleep(0.1)
 
-            if self.index >= len(self.offset_waypoint_utm):
+            if self.index >= len(self.offset_waypoint_utm) or self.index >= len(self.waypoint_list):
                 rospy.loginfo('[SweepingGenerator]: follower completed all waypoints, restarting from beginning')
                 self.index = 0
                 break
