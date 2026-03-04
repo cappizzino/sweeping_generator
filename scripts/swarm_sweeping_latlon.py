@@ -127,7 +127,7 @@ class Node:
         self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(60.0))
         self.listener = tf2_ros.TransformListener(self.tf_buffer)
 
-        self.main_count_max = rospy.get_param('~main_count_max', 20)
+        self.main_count_max = rospy.get_param('~main_count_max', 5)
         self.main_count = 0
 
         rospy.loginfo('[SweepingGenerator]: initialized')
@@ -362,6 +362,7 @@ class Node:
         if self.octomap_planner_set:
 
             for waypoint in self.waypoint_list:
+                rospy.logwarn('[SweepingGenerator]: processing waypoint index: {}'.format(self.waypoint_count))
                 rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
 
                 ref = ReferenceStamped()
@@ -396,10 +397,26 @@ class Node:
                 try:
                     response = self.sc_octomap_planner.call(point)
                     rospy.loginfo(f"Response: success={response.success}, message='{response.message}'")
-                    self.waypoint_count += 1
-                    self.main_count = 0
-                    while not self.has_goal and self.main_count < self.main_count_max:
+                    # self.waypoint_count += 1
+                    # self.main_count = 0
+
+                    # Wait for tracker goal flag with a local timeout (do not use shared main_count).
+                    wait_timeout_s =float(self.main_count_max)
+                    deadline = rospy.Time.now() + rospy.Duration(wait_timeout_s)
+                    while not rospy.is_shutdown() and not self.has_goal and rospy.Time.now() < deadline:
                         rospy.sleep(0.1)
+
+                    if not self.has_goal:
+                        rospy.logerr('[SweepingGenerator]: tracker goal not confirmed within {:.1f}s, continuing'.format(wait_timeout_s))
+
+                    if self.waypoint_count == 0 and response.success:
+                        rospy.logwarn('[SweepingGenerator]: first waypoint reached goal state. Press Enter to continue with remaining waypoints.')
+                        try:
+                            input('[SweepingGenerator] Press Enter to continue...')
+                        except EOFError:
+                            rospy.logwarn('[SweepingGenerator]: stdin unavailable, continuing automatically.')
+
+                    self.waypoint_count += 1
                 except:
                     rospy.logerr('[SweepingGenerator]: octomap planner setting failed, message: {}'.format(response.message))
                     pass
@@ -407,7 +424,7 @@ class Node:
                 # while not self.idle and not rospy.is_shutdown():
                 #     rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
                 #     rospy.sleep(0.1)
-                rospy.sleep(20.0)
+                # rospy.sleep(20.0)
 
             self.waypoint_count = 0
 
