@@ -12,6 +12,7 @@ from mrs_msgs.srv import PathSrv,PathSrvRequest, ReferenceStampedSrv, ReferenceS
 from mrs_msgs.srv import TransformReferenceSrv, TransformReferenceSrvRequest
 from mrs_msgs.srv import Vec1,Vec1Response
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import PoseStamped, PoseArray
 from std_msgs.msg import UInt8
 from std_srvs.srv import Trigger
@@ -86,7 +87,10 @@ class Node:
         self.waypoint_list = rospy.get_param('~waypoint_list', [])
         self.offset_waypoint_utm = []
         self.waypoint_count = 0
-        self.waypoint_frame = rospy.get_param('~waypoint_frame', "world_origin")
+
+        self.initial_gnss_altitude = None
+        self.current_gnss_altitude = None
+        self.gnss_altitude_offset = 0.0
 
         if self.leader_swarm == False:
             waypoint_utm = []
@@ -99,7 +103,7 @@ class Node:
         self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(60.0))
         self.listener = tf2_ros.TransformListener(self.tf_buffer)
 
-        self.main_count_max = rospy.get_param('~main_count_max', 20)
+        self.main_count_max = rospy.get_param('~main_count_max', 5)
         self.main_count = 0
 
         rospy.loginfo('[SweepingGenerator]: initialized')
@@ -115,6 +119,7 @@ class Node:
             else:
                 self.sub_index = rospy.Subscriber(f"/{self.leader_name}/leader_index", UInt8, self.index_cb)
         self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
+        self.sub_gnss = rospy.Subscriber("hw_api/gnss", NavSatFix, self.callbackGnss)
         self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
         self.sub_octomap_planner_diag = rospy.Subscriber("~octomap_planner_diag_in", OctomapPlannerDiagnostics, self.callbackOctomapPlannerDiagnostics)
 
@@ -311,6 +316,27 @@ class Node:
 
     # #} end of callbackOdom
 
+    # #{ callbackGnss():
+
+    def callbackGnss(self, msg):
+
+        if not self.is_initialized:
+            return
+
+        rospy.loginfo_once('[SweepingGenerator]: getting GNSS message')
+
+        self.sub_gnss = msg
+        self.current_gnss_altitude = msg.altitude
+
+        # Save initial GNSS altitude exactly once and keep altitude offset w.r.t. that reference.
+        if self.initial_gnss_altitude is None:
+            self.initial_gnss_altitude = msg.altitude
+            rospy.loginfo('[SweepingGenerator]: initial GNSS altitude set to {:.3f} m'.format(self.initial_gnss_altitude))
+
+        self.gnss_altitude_offset = self.current_gnss_altitude - self.initial_gnss_altitude
+
+    # #} end of callbackGnss
+
     # #{ callbackMPC():
 
     def callbackMPC(self, msg):
@@ -334,6 +360,7 @@ class Node:
         if self.octomap_planner_set:
 
             for waypoint in self.waypoint_list:
+                rospy.logwarn('[SweepingGenerator]: processing waypoint index: {}'.format(self.waypoint_count))
                 rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
 
                 ref = ReferenceStamped()
@@ -350,7 +377,7 @@ class Node:
                 try:
                     response = self.sc_transform(request)
                     rospy.loginfo(f"Response: success={response.success}, message='{response.message}'")
-                    # rospy.loginfo(f"Transformed Reference: x={response.reference.reference.position.x}, y={response.reference.reference.position.y}")
+                    rospy.loginfo(f"Transformed Reference: x={response.reference.reference.position.x}, y={response.reference.reference.position.y}")
                 except rospy.ServiceException as e:
                     rospy.logerr(f"Service call failed: {e}")
                     pass
@@ -368,10 +395,24 @@ class Node:
                 try:
                     response = self.sc_octomap_planner.call(point)
                     rospy.loginfo(f"Response: success={response.success}, message='{response.message}'")
-                    self.waypoint_count += 1
-                    self.main_count = 0
-                    while not self.has_goal and self.main_count < self.main_count_max:
+
+                    # Wait for tracker goal flag with a local timeout (do not use shared main_count).
+                    wait_timeout_s =float(self.main_count_max)
+                    deadline = rospy.Time.now() + rospy.Duration(wait_timeout_s)
+                    while not rospy.is_shutdown() and not self.has_goal and rospy.Time.now() < deadline:
                         rospy.sleep(0.1)
+
+                    if not self.has_goal:
+                        rospy.logerr('[SweepingGenerator]: tracker goal not confirmed within {:.1f}s, continuing'.format(wait_timeout_s))
+
+                    if self.waypoint_count == 0 and response.success:
+                        rospy.logwarn('[SweepingGenerator]: first waypoint reached goal state. Press Enter to continue with remaining waypoints.')
+                        try:
+                            input('[SweepingGenerator] Press Enter to continue...')
+                        except EOFError:
+                            rospy.logwarn('[SweepingGenerator]: stdin unavailable, continuing automatically.')
+
+                    self.waypoint_count += 1
                 except:
                     rospy.logerr('[SweepingGenerator]: octomap planner setting failed, message: {}'.format(response.message))
                     pass
@@ -379,7 +420,7 @@ class Node:
                 # while not self.idle and not rospy.is_shutdown():
                 #     rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
                 #     rospy.sleep(0.1)
-                rospy.sleep(20.0)
+                # rospy.sleep(20.0)
 
             self.waypoint_count = 0
 
