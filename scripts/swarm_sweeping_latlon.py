@@ -114,6 +114,7 @@ class Node:
 
         self.offset_waypoint_utm = []
         self.waypoint_count = 0
+        self.publish_leader_index = False
         self.waypoint_frame = rospy.get_param('~waypoint_frame', "world_origin")
 
         if self.leader_swarm == False:
@@ -361,6 +362,14 @@ class Node:
 
         if self.octomap_planner_set:
 
+            if len(self.waypoint_list) == 0:
+                rospy.logwarn('[SweepingGenerator]: no waypoints configured')
+                return Vec1Response(False, "no waypoints configured")
+
+            self.waypoint_count = 0
+            self.publish_leader_index = False
+            planner_response = None
+
             for waypoint in self.waypoint_list:
                 rospy.logwarn('[SweepingGenerator]: processing waypoint index: {}'.format(self.waypoint_count))
                 rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
@@ -377,63 +386,70 @@ class Node:
                 request.reference = ref
 
                 try:
-                    response = self.sc_transform(request)
-                    rospy.loginfo(f"Response: success={response.success}, message='{response.message}'")
-                    # rospy.loginfo(f"Transformed Reference: x={response.reference.reference.position.x}, y={response.reference.reference.position.y}")
+                    transform_response = self.sc_transform(request)
+                    rospy.loginfo(f"Response: success={transform_response.success}, message='{transform_response.message}'")
                 except rospy.ServiceException as e:
                     rospy.logerr(f"Service call failed: {e}")
-                    pass
+                    return Vec1Response(False, "transform reference failed")
 
                 point = ReferenceStampedSrvRequest()
                 point.header.stamp = rospy.Time.now()
                 point.header.frame_id = self.uav_name + "/" + "world_origin"
-                point.reference.position.x = response.reference.reference.position.x
-                point.reference.position.y = response.reference.reference.position.y
+                point.reference.position.x = transform_response.reference.reference.position.x
+                point.reference.position.y = transform_response.reference.reference.position.y
                 point.reference.position.z = waypoint[2]
                 point.reference.heading = 0.0
 
                 rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
 
                 try:
-                    response = self.sc_octomap_planner.call(point)
-                    rospy.loginfo(f"Response: success={response.success}, message='{response.message}'")
-                    # self.waypoint_count += 1
-                    # self.main_count = 0
+                    self.has_goal = False
+                    planner_response = self.sc_octomap_planner.call(point)
+                    rospy.loginfo(f"Response: success={planner_response.success}, message='{planner_response.message}'")
+                except rospy.ServiceException as e:
+                    rospy.logerr(f"[SweepingGenerator]: octomap planner service not callable: {e}")
+                    return Vec1Response(False, "octomap planner service not callable")
 
-                    # Wait for tracker goal flag with a local timeout (do not use shared main_count).
-                    wait_timeout_s =float(self.main_count_max)
-                    deadline = rospy.Time.now() + rospy.Duration(wait_timeout_s)
-                    while not rospy.is_shutdown() and not self.has_goal and rospy.Time.now() < deadline:
+                if not planner_response.success:
+                    rospy.logerr('[SweepingGenerator]: octomap planner setting failed, message: {}'.format(planner_response.message))
+                    return Vec1Response(False, "octomap planner setting failed")
+
+                # Wait for tracker to latch the goal before the next synchronization step.
+                wait_timeout_s = float(self.main_count_max)
+                deadline = rospy.Time.now() + rospy.Duration(wait_timeout_s)
+                while not rospy.is_shutdown() and not self.has_goal and rospy.Time.now() < deadline:
+                    rospy.sleep(0.1)
+
+                if not self.has_goal:
+                    rospy.logerr('[SweepingGenerator]: tracker goal not confirmed within {:.1f}s, continuing'.format(wait_timeout_s))
+
+                if self.waypoint_count == 0:
+                    rospy.loginfo('[SweepingGenerator]: waiting for first waypoint completion (self.has_goal == False)')
+                    while not rospy.is_shutdown() and self.has_goal:
                         rospy.sleep(0.1)
+                    self.publish_leader_index = True
+                    rospy.logwarn('[SweepingGenerator]: first waypoint set. Press Enter to continue with remaining waypoints.')
+                    try:
+                        input('[SweepingGenerator] Press Enter to continue...')
+                    except EOFError:
+                        rospy.logwarn('[SweepingGenerator]: stdin unavailable, continuing automatically.')
+                else:
+                    rospy.loginfo('[SweepingGenerator]: waiting for waypoint {} completion (self.has_goal == False)'.format(self.waypoint_count))
+                    while not rospy.is_shutdown() and self.has_goal:
+                        rospy.sleep(0.1)
+                    rospy.loginfo('[SweepingGenerator]: waypoint {} completed, moving to next'.format(self.waypoint_count))
 
-                    if not self.has_goal:
-                        rospy.logerr('[SweepingGenerator]: tracker goal not confirmed within {:.1f}s, continuing'.format(wait_timeout_s))
-
-                    if self.waypoint_count == 0 and response.success:
-                        rospy.logwarn('[SweepingGenerator]: first waypoint reached goal state. Press Enter to continue with remaining waypoints.')
-                        try:
-                            input('[SweepingGenerator] Press Enter to continue...')
-                        except EOFError:
-                            rospy.logwarn('[SweepingGenerator]: stdin unavailable, continuing automatically.')
-
+                if self.waypoint_count < (len(self.waypoint_list) - 1):
                     self.waypoint_count += 1
-                except:
-                    rospy.logerr('[SweepingGenerator]: octomap planner setting failed, message: {}'.format(response.message))
-                    pass
 
-                # while not self.idle and not rospy.is_shutdown():
-                #     rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
-                #     rospy.sleep(0.1)
-                # rospy.sleep(20.0)
+            self.publish_leader_index = False
 
-            self.waypoint_count = 0
-
-            if response.success:
+            if planner_response and planner_response.success:
                 rospy.loginfo('[SweepingGenerator]: octomap planner set')
                 return Vec1Response(True, "starting")
-            else:
-                rospy.loginfo('[SweepingGenerator]: octomap planner setting failed, message: {}'.format(response.message))
-                return Vec1Response(False, "octomap planner setting failed")
+
+            rospy.loginfo('[SweepingGenerator]: octomap planner setting failed')
+            return Vec1Response(False, "octomap planner setting failed")
 
         # set the step size based on the service data
         step_size = req.goal
@@ -545,7 +561,7 @@ class Node:
         self.timeout_counter = 0
 
         # Index of the leader waypoint
-        self.index = msg.data - 1
+        self.index = msg.data
 
         rospy.loginfo_once('[SweepingGenerator]: getting leader index message: {}'.format(self.index))
 
@@ -563,18 +579,18 @@ class Node:
         if isinstance(self.sub_control_manager_diag, ControlManagerDiagnostics):
             if self.sub_control_manager_diag.tracker_status.have_goal:
                 self.has_goal = True
-                rospy.loginfo('[SweepingGenerator]: tracker has goal')
+                # rospy.loginfo('[SweepingGenerator]: tracker has goal')
             else:
                 self.has_goal = False
-                rospy.loginfo('[SweepingGenerator]: waiting for command')
+                # rospy.loginfo('[SweepingGenerator]: waiting for command')
 
         if isinstance(self.sub_octomap_planner_diag, OctomapPlannerDiagnostics):
             if self.sub_octomap_planner_diag.idle:
                 self.idle = True
-                rospy.loginfo('[SweepingGenerator]: Octomap planner is idle.')
+                # rospy.loginfo('[SweepingGenerator]: Octomap planner is idle.')
             else:
                 self.idle = False
-                rospy.loginfo('[SweepingGenerator]: Octomap planner is not idle.')
+                # rospy.loginfo('[SweepingGenerator]: Octomap planner is not idle.')
         
         self.main_count += 1
         # rospy.loginfo('[SweepingGenerator]: Flag: {}'.format(self.main_count))
@@ -627,9 +643,9 @@ class Node:
                 input_pose.header.stamp = rospy.Time(0)
                 input_pose.header.frame_id = self.sub_mpc.header.frame_id
                 i_mpc = int(len(self.sub_mpc.poses)/4)
-                rospy.loginfo(f"[SweepingGenerator]: using MPC pose index {i_mpc} out of {len(self.sub_mpc.poses)}")
+                #rospy.loginfo(f"[SweepingGenerator]: using MPC pose index {i_mpc} out of {len(self.sub_mpc.poses)}")
                 input_pose.pose = self.sub_mpc.poses[i_mpc]
-                rospy.loginfo(f"[SweepingGenerator]: leader at ({input_pose.pose.position.x:.2f}, {input_pose.pose.position.y:.2f}, {input_pose.pose.position.z:.2f})")
+                #rospy.loginfo(f"[SweepingGenerator]: leader at ({input_pose.pose.position.x:.2f}, {input_pose.pose.position.y:.2f}, {input_pose.pose.position.z:.2f})")
                 target_frame = self.leader_name + "/" + self.frame_publish
                 transformed_pose = self.transform_pose(input_pose, target_frame)
 
@@ -666,7 +682,7 @@ class Node:
 
         rospy.loginfo_once('[SweepingGenerator]: index timer spinning')
 
-        if self.waypoint_count == 0:
+        if not self.publish_leader_index:
             return
         self.index_pub.publish(self.waypoint_count)
 
@@ -717,6 +733,16 @@ class Node:
             if self.leader_lost:
                 self.index += 1
                 rospy.loginfo('[SweepingGenerator]: leader lost, moving to next waypoint index: {}'.format(self.index))
+
+            waypoint_count_total = len(self.offset_waypoint_utm) if self.offset_waypoint_utm_flag else len(self.waypoint_list)
+            if self.index < 0:
+                rospy.logwarn_throttle(2.0, '[SweepingGenerator]: received negative waypoint index: {}'.format(self.index))
+                rospy.sleep(0.1)
+                continue
+            if self.index >= waypoint_count_total:
+                rospy.loginfo_throttle(2.0, '[SweepingGenerator]: index {} out of range [0, {}], waiting...'.format(self.index, waypoint_count_total - 1))
+                rospy.sleep(0.1)
+                continue
 
             if self.offset_waypoint_utm_flag and self.index < len(self.offset_waypoint_utm):
                 point = ReferenceStampedSrvRequest()
@@ -785,11 +811,6 @@ class Node:
             while index == self.index and not self.leader_lost and not rospy.is_shutdown():
                 rospy.loginfo_throttle(2.0, '[SweepingGenerator]: Waiting for planner to become ready...')
                 rospy.sleep(0.1)
-
-            if self.index >= len(self.offset_waypoint_utm) or self.index >= len(self.waypoint_list):
-                rospy.loginfo('[SweepingGenerator]: follower completed all waypoints, restarting from beginning')
-                self.index = 0
-                break
 
     def transform_pose(self, input_pose, target_frame):
         """Transforms a PoseStamped to the target_frame using TF2."""
