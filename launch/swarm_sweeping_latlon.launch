@@ -1,0 +1,39 @@
+<launch>
+
+  <!-- args corresponding to environment variables -->
+  <arg name="UAV_NAME" default="$(optenv UAV_NAME)" />
+  <arg name="UAV_NAMES" default="$(optenv UAV_NAMES)" />
+  <arg name="COMPUTER_NAME" default="$(optenv COMPUTER_NAME)" />
+
+  <!-- Namespace - all topics, services and parameters are prefixed by UAV_NAME -->
+  <group ns="$(arg UAV_NAME)">
+
+    <node pkg="sweeping_generator" type="swarm_sweeping_latlon.py" name="sweeping_generator" output="screen">
+
+      <!-- ROS parameters config file -->
+      <rosparam file="$(find sweeping_generator)/config/sweeping_generator.yaml" />
+
+      <param name="uav_name" value="$(arg UAV_NAME)" />
+      <param name="uav_names" type="yaml" value="$(arg UAV_NAMES)" />
+      <param name="computer_name" value="$(arg COMPUTER_NAME)" />
+
+      <param name="offset_waypoint_utm_flag" value="false" />
+      <param name="automated_calculation" value="true" />
+      <param name="lat_start" value="47.3976977" />
+      <param name="lon_start" value="8.5457273" />
+      <param name="lat_end" value="47.3978345" />
+      <param name="lon_end" value="8.5459904" />
+      <param name="altitude" value="1.5" />
+      <param name="distance_between_drones" value="5.0" />
+      <param name="distance_line" value="10.0" />
+
+      <remap from="~control_manager_diag_in" to="control_manager/diagnostics" />
+      <remap from="~octomap_planner_diag_in" to="octomap_planner/diagnostics" />
+      <remap from="~path_out" to="trajectory_generation/path" />
+      <remap from="~start_in" to="~start" />
+
+    </node>
+
+  </group>
+
+</launch>

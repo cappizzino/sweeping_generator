@@ -1,7 +1,7 @@
 frame_id: "world_origin"
 
 leader_msg: "mpc"
-frame_publish: "utm_navsat"
+frame_publish: "utm_origin"
 
 timer_main:
   rate: 1.0 # [Hz]

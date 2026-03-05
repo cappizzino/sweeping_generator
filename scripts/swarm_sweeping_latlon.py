@@ -132,10 +132,14 @@ class Node:
         self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(60.0))
         self.listener = tf2_ros.TransformListener(self.tf_buffer)
 
-        self.main_count_max = rospy.get_param('~main_count_max', 5)
+        self.main_count_max = rospy.get_param('~main_count_max', 10)
         self.main_count = 0
         self.fallback_goal_latch_timeout = rospy.get_param('~fallback_goal_latch_timeout', float(self.main_count_max))
         self.fallback_goal_completion_timeout = rospy.get_param('~fallback_goal_completion_timeout', 10.0)
+        self.rejoin_policy = rospy.get_param('~rejoin_policy', 'keep_fallback')
+        if self.rejoin_policy not in ['return', 'keep_fallback', 'wait_sync']:
+            rospy.logwarn("[SweepingGenerator]: invalid ~rejoin_policy='%s', using 'keep_fallback'", self.rejoin_policy)
+            self.rejoin_policy = 'keep_fallback'
 
         rospy.loginfo('[SweepingGenerator]: initialized')
 
@@ -567,8 +571,9 @@ class Node:
 
         # Index of the leader waypoint
         self.leader_index = int(msg.data)
-        self.autonomous_fallback = False
-        self.local_index = None
+        if self.rejoin_policy == 'return':
+            self.autonomous_fallback = False
+            self.local_index = None
 
         rospy.loginfo_once('[SweepingGenerator]: getting leader index message: {}'.format(self.leader_index))
 
@@ -738,23 +743,46 @@ class Node:
                 rospy.sleep(0.2)
                 continue
 
-            if self.leader_lost:
-                if not self.autonomous_fallback:
-                    if self.leader_index is not None:
-                        self.local_index = self.leader_index
-                    elif self.local_index is None:
-                        self.local_index = 0
-                    self.local_index = max(0, min(self.local_index, waypoint_count_total - 1))
-                    self.autonomous_fallback = True
-                    self.last_sent_index = None
-                    rospy.logwarn('[SweepingGenerator]: leader lost, autonomous fallback from index {}'.format(self.local_index))
-                target_index = self.local_index
+            if self.leader_lost and not self.autonomous_fallback:
+                if self.leader_index is not None:
+                    self.local_index = self.leader_index
+                elif self.local_index is None:
+                    self.local_index = 0
+                self.local_index = max(0, min(self.local_index, waypoint_count_total - 1))
+                self.autonomous_fallback = True
+                self.last_sent_index = None
+                rospy.logwarn('[SweepingGenerator]: leader lost, autonomous fallback from index {}'.format(self.local_index))
+
+            if self.autonomous_fallback:
+                if self.local_index is None:
+                    self.local_index = 0
+
+                if self.rejoin_policy == 'keep_fallback':
+                    target_index = self.local_index
+                elif self.rejoin_policy == 'wait_sync':
+                    if (not self.leader_lost) and (self.leader_index is not None):
+                        if self.leader_index >= self.local_index:
+                            rospy.logwarn('[SweepingGenerator]: leader caught up (leader=%d, local=%d), resuming leader mode', self.leader_index, self.local_index)
+                            self.autonomous_fallback = False
+                            self.local_index = None
+                            target_index = self.leader_index
+                        else:
+                            rospy.loginfo_throttle(2.0, '[SweepingGenerator]: wait_sync, waiting leader to catch up (leader=%d, local=%d)', self.leader_index, self.local_index)
+                            rospy.sleep(0.1)
+                            continue
+                    else:
+                        target_index = self.local_index
+                else:
+                    if (not self.leader_lost) and (self.leader_index is not None):
+                        self.autonomous_fallback = False
+                        self.local_index = None
+                        target_index = self.leader_index
+                    else:
+                        target_index = self.local_index
             else:
                 if self.leader_index is None:
                     rospy.sleep(0.1)
                     continue
-                self.autonomous_fallback = False
-                self.local_index = None
                 target_index = self.leader_index
 
             if target_index < 0:
@@ -859,7 +887,7 @@ class Node:
                         self.local_index += 1
                     continue
 
-            while not rospy.is_shutdown() and not self.leader_lost and self.leader_index == target_index:
+            while not rospy.is_shutdown() and (not self.autonomous_fallback) and (not self.leader_lost) and self.leader_index == target_index:
                 rospy.sleep(0.1)
 
     def transform_pose(self, input_pose, target_frame):
