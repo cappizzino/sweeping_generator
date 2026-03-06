@@ -152,7 +152,7 @@ class Node:
             if self.leader_reference_set == True:
                 self.sub_reference = rospy.Subscriber(f"/{self.leader_name}/leader_reference", Reference, self.reference_cb)
             else:
-                self.sub_index = rospy.Subscriber(f"/{self.leader_name}/leader_index_gated", UInt8, self.index_cb)
+                self.sub_index = rospy.Subscriber(f"/{self.leader_name}/leader_index", UInt8, self.index_cb)
         self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
         self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
         self.sub_octomap_planner_diag = rospy.Subscriber("~octomap_planner_diag_in", OctomapPlannerDiagnostics, self.callbackOctomapPlannerDiagnostics)
