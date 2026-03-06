@@ -115,7 +115,7 @@ class Node:
         self.offset_waypoint_utm = []
         self.waypoint_count = 0
         self.publish_leader_index = False
-        self.waypoint_frame = rospy.get_param('~waypoint_frame', "world_origin")
+        self.waypoint_frame = rospy.get_param('~waypoint_frame', "fixed_origin")
         self.leader_index = None
         self.local_index = None
         self.autonomous_fallback = False
@@ -391,7 +391,7 @@ class Node:
                 ref.reference.heading = 0.0
 
                 request = TransformReferenceSrvRequest()
-                request.frame_id = self.uav_name + "/" + "world_origin"
+                request.frame_id = self.uav_name + "/" + "fixed_origin"
                 request.reference = ref
 
                 try:
@@ -403,7 +403,7 @@ class Node:
 
                 point = ReferenceStampedSrvRequest()
                 point.header.stamp = rospy.Time.now()
-                point.header.frame_id = self.uav_name + "/" + "world_origin"
+                point.header.frame_id = self.uav_name + "/" + "fixed_origin"
                 point.reference.position.x = transform_response.reference.reference.position.x
                 point.reference.position.y = transform_response.reference.reference.position.y
                 point.reference.position.z = waypoint[2]
@@ -820,7 +820,7 @@ class Node:
                     ref.reference.heading = 0.0
 
                     request = TransformReferenceSrvRequest()
-                    request.frame_id = self.uav_name + "/" + "world_origin"
+                    request.frame_id = self.uav_name + "/" + "fixed_origin"
                     request.reference = ref
 
                     try:
@@ -833,7 +833,7 @@ class Node:
 
                     point = ReferenceStampedSrvRequest()
                     point.header.stamp = rospy.Time.now()
-                    point.header.frame_id = self.uav_name + "/" + "world_origin"
+                    point.header.frame_id = self.uav_name + "/" + "fixed_origin"
                     point.reference.position.x = transform_response.reference.reference.position.x
                     point.reference.position.y = transform_response.reference.reference.position.y
                     point.reference.position.z = waypoint[2]
