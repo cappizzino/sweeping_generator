@@ -167,6 +167,7 @@ class Node:
         ## | --------------------- service servers -------------------- |
         if self.leader_swarm:
             self.ss_start = rospy.Service('~start_in', Vec1, self.callbackStart)
+        self.ss_emergency = rospy.Service('~emergency', Trigger, self.callbackEmergency)
 
         ## | --------------------- service clients -------------------- |
         if self.leader_swarm:
@@ -479,6 +480,35 @@ class Node:
         return Vec1Response(True, "starting")
 
     # #} end of callbackStart
+
+    # #{ callbackEmergency():
+
+    def callbackEmergency(self, req):
+
+        rospy.logwarn('[SweepingGenerator]: emergency stop triggered, stopping octomap planner and clearing path')
+
+        try:
+            self.sc_octomap_planner_stop()
+            rospy.loginfo('[SweepingGenerator]: octomap planner stop service called successfully')
+        except rospy.ServiceException as e:
+            rospy.logerr(f'[SweepingGenerator]: octomap planner stop service call failed: {e}')
+
+        try:
+            point = ReferenceStampedSrvRequest()
+            point.header.stamp = rospy.Time.now()
+            point.header.frame_id = self.uav_name + "/" + "local_origin"
+            point.reference.position.x = 0.0
+            point.reference.position.y = 0.0
+            point.reference.position.z = waypoint[2]
+            point.reference.heading = 0.0
+            self.sc_octomap_planner.call(ReferenceStampedSrvRequest())
+            rospy
+        except rospy.ServiceException as e:
+            rospy.logerr(f'[SweepingGenerator]: octomap planner service call failed: {e}')
+
+        return TriggerResponse(success=True, message="emergency stop executed")
+
+    # #} end of callbackEmergency
 
     # #{ reference_cb():
 
