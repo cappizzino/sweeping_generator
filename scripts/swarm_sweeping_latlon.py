@@ -11,6 +11,7 @@ from mrs_modules_msgs.msg import OctomapPlannerDiagnostics
 from mrs_msgs.srv import PathSrv,PathSrvRequest, ReferenceStampedSrv, ReferenceStampedSrvRequest
 from mrs_msgs.srv import TransformReferenceSrv, TransformReferenceSrvRequest
 from mrs_msgs.srv import Vec1,Vec1Response
+from mrs_msgs.srv import String, StringRequest
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, PoseArray
 from std_msgs.msg import UInt8
@@ -118,7 +119,7 @@ class Node:
         self.offset_waypoint_utm = []
         self.waypoint_count = 0
         self.publish_leader_index = False
-        self.waypoint_frame = rospy.get_param('~waypoint_frame', "fixed_origin")
+        # self.waypoint_frame = rospy.get_param('~waypoint_frame', "fixed_origin")
         self.leader_index = None
         self.local_index = None
         self.autonomous_fallback = False
@@ -184,6 +185,21 @@ class Node:
         rospy.loginfo('[SweepingGenerator]: service available: {}'.format(service_name))
         self.sc_transform = rospy.ServiceProxy(service_name, TransformReferenceSrv)
         self.sc_landing = rospy.ServiceProxy(f'/{self.uav_name}/uav_manager/land', Trigger)
+
+        # # Change estimator
+        # service_name = f'/{self.uav_name}/estimation_manager/change_estimator'
+        # self.sc_change_estimator = rospy.ServiceProxy(service_name, String)
+
+        # rospy.loginfo('[SweepingGenerator]: all service clients initialized')
+        # rospy.loginfo('[SweepingGenerator]: sleeping for 1 second before changing estimator')
+        # rospy.sleep(3.0)
+        # req = StringRequest()
+        # req.value = "liosam"
+        # try:
+        #     result = self.sc_change_estimator(req)
+        #     rospy.loginfo(f"Estimator change result: success={result.success}, message='{result.message}'")
+        # except rospy.ServiceException as e:
+        #     rospy.logerr(f"Service call failed: {e}")
 
         ## | ------------------------- timers ------------------------- |
         if self.leader_swarm:
@@ -396,7 +412,7 @@ class Node:
                 ref.reference.heading = 0.0
 
                 request = TransformReferenceSrvRequest()
-                request.frame_id = self.uav_name + "/" + "fixed_origin"
+                request.frame_id = self.uav_name + "/" + "liosam_origin"
                 request.reference = ref
 
                 try:
@@ -408,7 +424,7 @@ class Node:
 
                 point = ReferenceStampedSrvRequest()
                 point.header.stamp = rospy.Time.now()
-                point.header.frame_id = self.uav_name + "/" + "fixed_origin"
+                point.header.frame_id = self.uav_name + "/" + "liosam_origin"
                 point.reference.position.x = transform_response.reference.reference.position.x
                 point.reference.position.y = transform_response.reference.reference.position.y
                 point.reference.position.z = waypoint[2]
@@ -903,7 +919,7 @@ class Node:
                     ref.reference.heading = 0.0
 
                     request = TransformReferenceSrvRequest()
-                    request.frame_id = self.uav_name + "/" + "fixed_origin"
+                    request.frame_id = self.uav_name + "/" + "liosam_origin"
                     request.reference = ref
 
                     try:
@@ -916,7 +932,7 @@ class Node:
 
                     point = ReferenceStampedSrvRequest()
                     point.header.stamp = rospy.Time.now()
-                    point.header.frame_id = self.uav_name + "/" + "fixed_origin"
+                    point.header.frame_id = self.uav_name + "/" + "liosam_origin"
                     point.reference.position.x = transform_response.reference.reference.position.x
                     point.reference.position.y = transform_response.reference.reference.position.y
                     point.reference.position.z = waypoint[2]
