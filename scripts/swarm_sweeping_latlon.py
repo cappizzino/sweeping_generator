@@ -14,7 +14,8 @@ from mrs_msgs.srv import Vec1,Vec1Response
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, PoseArray
 from std_msgs.msg import UInt8
-from std_srvs.srv import Trigger
+from std_srvs.srv import Trigger, TriggerResponse
+from rospy import ServiceException
 from waypoints_latlog import SwarmInputs, compute_swarm_waypoint_lines
 
 class Node:
@@ -72,6 +73,8 @@ class Node:
         self.octomap_planner_set = rospy.get_param("~octomap_planner_set", True)
         self.leader_reference_set = rospy.get_param("~leader_reference_set", False)
         self.heading_leader_zero = rospy.get_param("~heading_leader_zero", False)
+
+        self.emergency_hover_z = rospy.get_param("~emergency_hover_z", 2.0)
 
         if self.id != 0:
             if self.id % 2 == 0:
@@ -167,7 +170,7 @@ class Node:
         ## | --------------------- service servers -------------------- |
         if self.leader_swarm:
             self.ss_start = rospy.Service('~start_in', Vec1, self.callbackStart)
-        self.ss_emergency = rospy.Service('~emergency', Trigger, self.callbackEmergency)
+        self.ss_emergency = rospy.Service('~emergency_in', Trigger, self.callbackEmergency)
 
         ## | --------------------- service clients -------------------- |
         if self.leader_swarm:
@@ -180,6 +183,7 @@ class Node:
         rospy.wait_for_service(service_name)
         rospy.loginfo('[SweepingGenerator]: service available: {}'.format(service_name))
         self.sc_transform = rospy.ServiceProxy(service_name, TransformReferenceSrv)
+        self.sc_landing = rospy.ServiceProxy(f'/{self.uav_name}/uav_manager/land', Trigger)
 
         ## | ------------------------- timers ------------------------- |
         if self.leader_swarm:
@@ -484,29 +488,78 @@ class Node:
     # #{ callbackEmergency():
 
     def callbackEmergency(self, req):
+        rospy.logwarn('[SweepingGenerator]: Emergency stop triggered')
 
-        rospy.logwarn('[SweepingGenerator]: emergency stop triggered, stopping octomap planner and clearing path')
+        # Optional: prevent duplicate execution
+        if getattr(self, 'emergency_active', False):
+            rospy.logwarn('[SweepingGenerator]: Emergency already active')
+            return TriggerResponse(success=True, message='emergency already active')
 
+        self.emergency_active = True
+
+        failures = []
+
+        # 1) Stop octomap planner
         try:
-            self.sc_octomap_planner_stop()
-            rospy.loginfo('[SweepingGenerator]: octomap planner stop service called successfully')
-        except rospy.ServiceException as e:
-            rospy.logerr(f'[SweepingGenerator]: octomap planner stop service call failed: {e}')
+            stop_resp = self.sc_octomap_planner_stop()
+            if stop_resp.success:
+                rospy.loginfo('[SweepingGenerator]: Octomap planner stopped successfully')
+            else:
+                msg = f'planner stop failed: {stop_resp.message}'
+                rospy.logerr(f'[SweepingGenerator]: {msg}')
+                failures.append(msg)
+        except ServiceException as e:
+            msg = f'planner stop service call failed: {e}'
+            rospy.logerr(f'[SweepingGenerator]: {msg}')
+            failures.append(msg)
 
+        # 2) Clear planner path / reset goal
         try:
-            point = ReferenceStampedSrvRequest()
-            point.header.stamp = rospy.Time.now()
-            point.header.frame_id = self.uav_name + "/" + "local_origin"
-            point.reference.position.x = 0.0
-            point.reference.position.y = 0.0
-            point.reference.position.z = waypoint[2]
-            point.reference.heading = 0.0
-            self.sc_octomap_planner.call(ReferenceStampedSrvRequest())
-            rospy
-        except rospy.ServiceException as e:
-            rospy.logerr(f'[SweepingGenerator]: octomap planner service call failed: {e}')
+            clear_req = ReferenceStampedSrvRequest()
+            clear_req.header.stamp = rospy.Time.now()
+            clear_req.header.frame_id = f'{self.uav_name}/local_origin'
+            clear_req.reference.position.x = 0.0
+            clear_req.reference.position.y = 0.0
+            clear_req.reference.position.z = self.emergency_hover_z  # define this explicitly
+            clear_req.reference.heading = 0.0
 
-        return TriggerResponse(success=True, message="emergency stop executed")
+            clear_resp = self.sc_octomap_planner(clear_req)
+            if clear_resp.success:
+                rospy.loginfo('[SweepingGenerator]: Octomap planner path cleared successfully')
+            else:
+                msg = f'planner clearing failed: {clear_resp.message}'
+                rospy.logerr(f'[SweepingGenerator]: {msg}')
+                failures.append(msg)
+        except ServiceException as e:
+            msg = f'planner clearing service call failed: {e}'
+            rospy.logerr(f'[SweepingGenerator]: {msg}')
+            failures.append(msg)
+        except AttributeError as e:
+            msg = f'invalid emergency altitude/configuration: {e}'
+            rospy.logerr(f'[SweepingGenerator]: {msg}')
+            failures.append(msg)
+
+        # 3) Attempt landing regardless of planner result
+        try:
+            land_resp = self.sc_landing()
+            if land_resp.success:
+                rospy.loginfo('[SweepingGenerator]: Landing initiated successfully')
+            else:
+                msg = f'landing initiation failed: {land_resp.message}'
+                rospy.logerr(f'[SweepingGenerator]: {msg}')
+                failures.append(msg)
+        except ServiceException as e:
+            msg = f'landing service call failed: {e}'
+            rospy.logerr(f'[SweepingGenerator]: {msg}')
+            failures.append(msg)
+
+        if failures:
+            return TriggerResponse(
+                success=False,
+                message='emergency executed with errors: ' + '; '.join(failures)
+            )
+
+        return TriggerResponse(success=True, message='emergency stop executed successfully')
 
     # #} end of callbackEmergency
 
