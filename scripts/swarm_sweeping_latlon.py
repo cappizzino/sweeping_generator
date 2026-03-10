@@ -602,6 +602,16 @@ class Node:
             rospy.logerr(f'[SweepingGenerator]: {msg}')
             failures.append(msg)
 
+        # Wait for tracker to latch the goal before the next synchronization step.
+        wait_timeout_s = float(self.main_count_max)
+        deadline = rospy.Time.now() + rospy.Duration(wait_timeout_s)
+        rospy.loginfo('[SweepingGenerator]: waiting for tracker to latch emergency goal (self.has_goal == True)')
+        while not rospy.is_shutdown() and not self.has_goal and rospy.Time.now() < deadline:
+            rospy.sleep(0.1)
+
+        while not rospy.is_shutdown() and self.has_goal:
+            rospy.sleep(0.1)
+
         # 3) Attempt landing regardless of planner result
         try:
             land_resp = self.sc_landing()
