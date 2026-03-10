@@ -13,6 +13,7 @@ from mrs_msgs.srv import TransformReferenceSrv, TransformReferenceSrvRequest
 from mrs_msgs.srv import Vec1,Vec1Response
 from mrs_msgs.srv import String, StringRequest
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import PoseStamped, PoseArray
 from std_msgs.msg import UInt8
 from std_srvs.srv import Trigger, TriggerResponse
@@ -124,6 +125,9 @@ class Node:
         self.local_index = None
         self.autonomous_fallback = False
         self.last_sent_index = None
+        self.initial_gnss_acquired = False
+        self.initial_latitude = None
+        self.initial_longitude = None
 
         if self.leader_swarm == False:
             waypoint_utm = []
@@ -158,6 +162,7 @@ class Node:
             else:
                 self.sub_index = rospy.Subscriber(f"/{self.leader_name}/leader_index", UInt8, self.index_cb)
         self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
+        self.sub_gnss = rospy.Subscriber("hw_api/gnss", NavSatFix, self.callbackGnss)
         self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
         self.sub_octomap_planner_diag = rospy.Subscriber("~octomap_planner_diag_in", OctomapPlannerDiagnostics, self.callbackOctomapPlannerDiagnostics)
 
@@ -383,6 +388,28 @@ class Node:
 
     # #} end of callbackMPC
 
+    # #{ callbackGnss():
+
+    def callbackGnss(self, msg):
+
+        if self.initial_gnss_acquired:
+            return
+
+        self.initial_latitude = msg.latitude
+        self.initial_longitude = msg.longitude
+        self.initial_gnss_acquired = True
+
+        rospy.loginfo(
+            "[SweepingGenerator]: initial GNSS captured lat=%.8f lon=%.8f",
+            self.initial_latitude,
+            self.initial_longitude
+        )
+
+        # Consume only the first GNSS sample to keep a fixed origin offset.
+        self.sub_gnss.unregister()
+
+    # #} end of callbackGnss
+
     # #{ callbackStart():
 
     def callbackStart(self, req):
@@ -531,23 +558,43 @@ class Node:
 
         # 2) Clear planner path / reset goal
         try:
-            clear_req = ReferenceStampedSrvRequest()
-            clear_req.header.stamp = rospy.Time.now()
-            clear_req.header.frame_id = f'{self.uav_name}/local_origin'
-            clear_req.reference.position.x = 0.0
-            clear_req.reference.position.y = 0.0
-            clear_req.reference.position.z = self.emergency_hover_z  # define this explicitly
-            clear_req.reference.heading = 0.0
+            if self.initial_latitude is None or self.initial_longitude is None:
+                raise AttributeError('initial GNSS reference unavailable')
 
-            clear_resp = self.sc_octomap_planner(clear_req)
-            if clear_resp.success:
-                rospy.loginfo('[SweepingGenerator]: Octomap planner path cleared successfully')
-            else:
-                msg = f'planner clearing failed: {clear_resp.message}'
+            ref = ReferenceStamped()
+            ref.header.frame_id = "latlon_origin"
+            ref.reference.position.x = self.initial_latitude
+            ref.reference.position.y = self.initial_longitude
+            ref.reference.position.z = 0.0
+            ref.reference.heading = 0.0
+
+            request = TransformReferenceSrvRequest()
+            request.frame_id = self.uav_name + "/" + "liosam_origin"
+            request.reference = ref
+
+            transform_response = self.sc_transform(request)
+            if not transform_response.success:
+                msg = f"transform reference failed: {transform_response.message}"
                 rospy.logerr(f'[SweepingGenerator]: {msg}')
                 failures.append(msg)
+            else:
+                point = ReferenceStampedSrvRequest()
+                point.header.stamp = rospy.Time.now()
+                point.header.frame_id = self.uav_name + "/" + "liosam_origin"
+                point.reference.position.x = transform_response.reference.reference.position.x
+                point.reference.position.y = transform_response.reference.reference.position.y
+                point.reference.position.z = self.emergency_hover_z
+                point.reference.heading = 0.0
+
+                clear_resp = self.sc_octomap_planner.call(point)
+                if clear_resp.success:
+                    rospy.loginfo('[SweepingGenerator]: Octomap planner path cleared successfully')
+                else:
+                    msg = f'planner clearing failed: {clear_resp.message}'
+                    rospy.logerr(f'[SweepingGenerator]: {msg}')
+                    failures.append(msg)
         except ServiceException as e:
-            msg = f'planner clearing service call failed: {e}'
+            msg = f'transform/planner service call failed: {e}'
             rospy.logerr(f'[SweepingGenerator]: {msg}')
             failures.append(msg)
         except AttributeError as e:
