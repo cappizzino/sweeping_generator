@@ -128,6 +128,13 @@ class Node:
         self.initial_gnss_acquired = False
         self.initial_latitude = None
         self.initial_longitude = None
+        self.initial_altitude = None
+        self.number_of_samples = int(rospy.get_param('~number_of_samples', 100))
+        if self.number_of_samples <= 0:
+            rospy.logwarn('[SweepingGenerator]: invalid ~number_of_samples=%d, using 1', self.number_of_samples)
+            self.number_of_samples = 1
+        self.gnss_altitude_sum = 0.0
+        self.gnss_sample_count = 0
 
         if self.leader_swarm == False:
             waypoint_utm = []
@@ -395,17 +402,34 @@ class Node:
         if self.initial_gnss_acquired:
             return
 
-        self.initial_latitude = msg.latitude
-        self.initial_longitude = msg.longitude
+        if self.gnss_sample_count == 0:
+            self.initial_latitude = msg.latitude
+            self.initial_longitude = msg.longitude
+
+        self.gnss_altitude_sum += msg.altitude
+        self.gnss_sample_count += 1
+
+        if self.gnss_sample_count < self.number_of_samples:
+            rospy.loginfo_throttle(
+                2.0,
+                '[SweepingGenerator]: collecting GNSS altitude samples: %d/%d',
+                self.gnss_sample_count,
+                self.number_of_samples
+            )
+            return
+
+        self.initial_altitude = self.gnss_altitude_sum / float(self.gnss_sample_count)
         self.initial_gnss_acquired = True
 
         rospy.loginfo(
-            "[SweepingGenerator]: initial GNSS captured lat=%.8f lon=%.8f",
+            "[SweepingGenerator]: initial GNSS captured lat=%.8f lon=%.8f alt(avg,%d)=%.3f",
             self.initial_latitude,
-            self.initial_longitude
+            self.initial_longitude,
+            self.gnss_sample_count,
+            self.initial_altitude
         )
 
-        # Consume only the first GNSS sample to keep a fixed origin offset.
+        # Consume only the required number of GNSS samples to keep a fixed origin offset.
         self.sub_gnss.unregister()
 
     # #} end of callbackGnss
