@@ -152,6 +152,12 @@ class Node:
 
         self.main_count_max = rospy.get_param('~main_count_max', 10)
         self.main_count = 0
+        self.departure_time = float(rospy.get_param('~departure_time', 0.0))
+        if self.departure_time < 0.0:
+            rospy.logwarn('[SweepingGenerator]: invalid ~departure_time=%.3f, using 0.0', self.departure_time)
+            self.departure_time = 0.0
+        self.first_leader_index_time = None
+        self.departure_released = self.leader_swarm or self.departure_time == 0.0 or self.wing_index == 0
         self.fallback_goal_latch_timeout = rospy.get_param('~fallback_goal_latch_timeout', float(self.main_count_max))
         self.fallback_goal_completion_timeout = rospy.get_param('~fallback_goal_completion_timeout', 10.0)
         self.rejoin_policy = rospy.get_param('~rejoin_policy', 'keep_fallback')
@@ -809,6 +815,16 @@ class Node:
 
         # Index of the leader waypoint
         self.leader_index = int(msg.data)
+
+        if self.first_leader_index_time is None:
+            self.first_leader_index_time = rospy.Time.now()
+            if not self.departure_released:
+                delay_s = float(self.wing_index) * self.departure_time
+                rospy.loginfo(
+                    '[SweepingGenerator]: first leader index received, follower departure delay %.2fs (wing=%d)',
+                    delay_s,
+                    self.wing_index
+                )
         if self.rejoin_policy == 'return':
             self.autonomous_fallback = False
             self.local_index = None
@@ -984,6 +1000,31 @@ class Node:
                 rospy.logwarn_throttle(2.0, '[SweepingGenerator]: no waypoints available for follower')
                 rospy.sleep(0.2)
                 continue
+
+            if not self.departure_released:
+                if self.first_leader_index_time is None:
+                    rospy.sleep(0.1)
+                    continue
+
+                elapsed_s = (rospy.Time.now() - self.first_leader_index_time).to_sec()
+                required_s = float(self.wing_index) * self.departure_time
+                if elapsed_s < required_s:
+                    rospy.loginfo_throttle(
+                        2.0,
+                        '[SweepingGenerator]: departure gate active %.1f/%.1fs (wing=%d)',
+                        elapsed_s,
+                        required_s,
+                        self.wing_index
+                    )
+                    rospy.sleep(0.1)
+                    continue
+
+                self.departure_released = True
+                rospy.loginfo(
+                    '[SweepingGenerator]: departure gate released after %.2fs (wing=%d)',
+                    required_s,
+                    self.wing_index
+                )
 
             if not self.altitude_offset_ready:
                 rospy.logwarn_throttle(
