@@ -15,7 +15,7 @@ from mrs_msgs.srv import String, StringRequest
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import PoseStamped, PoseArray
-from std_msgs.msg import UInt8
+from std_msgs.msg import UInt8, Float64
 from std_srvs.srv import Trigger, TriggerResponse
 from rospy import ServiceException
 from waypoints_latlog import SwarmInputs, compute_swarm_waypoint_lines
@@ -129,6 +129,9 @@ class Node:
         self.initial_latitude = None
         self.initial_longitude = None
         self.initial_altitude = None
+        self.leader_initial_altitude = None
+        self.altitude_offset_z = 0.0
+        self.altitude_offset_ready = self.leader_swarm
         self.number_of_samples = int(rospy.get_param('~number_of_samples', 100))
         if self.number_of_samples <= 0:
             rospy.logwarn('[SweepingGenerator]: invalid ~number_of_samples=%d, using 1', self.number_of_samples)
@@ -170,6 +173,12 @@ class Node:
                 self.sub_index = rospy.Subscriber(f"/{self.leader_name}/leader_index", UInt8, self.index_cb)
         self.sub_odom = rospy.Subscriber(f"/{self.uav_name}/estimation_manager/odom_main", Odometry, self.callbackOdom)
         self.sub_gnss = rospy.Subscriber("hw_api/gnss", NavSatFix, self.callbackGnss)
+        if not self.leader_swarm:
+            self.sub_leader_initial_altitude = rospy.Subscriber(
+                f"/{self.leader_name}/initial_altitude",
+                Float64,
+                self.callbackLeaderInitialAltitude
+            )
         self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
         self.sub_octomap_planner_diag = rospy.Subscriber("~octomap_planner_diag_in", OctomapPlannerDiagnostics, self.callbackOctomapPlannerDiagnostics)
 
@@ -177,6 +186,12 @@ class Node:
         if self.leader_swarm:
             self.ref_pub = rospy.Publisher(f"/{self.uav_name}/leader_reference", Reference, queue_size=1)
             self.index_pub = rospy.Publisher(f"/{self.uav_name}/leader_index", UInt8, queue_size=1)
+            self.initial_altitude_pub = rospy.Publisher(
+                f"/{self.uav_name}/initial_altitude",
+                Float64,
+                queue_size=1,
+                latch=True
+            )
         else:
             self.ref_pub = rospy.Publisher(f"/{self.uav_name}/control_manager/reference", ReferenceStamped, queue_size=1)
 
@@ -429,10 +444,50 @@ class Node:
             self.initial_altitude
         )
 
+        if self.leader_swarm:
+            self.leader_initial_altitude = self.initial_altitude
+            self.altitude_offset_z = 0.0
+            self.altitude_offset_ready = True
+            self.initial_altitude_pub.publish(Float64(data=self.initial_altitude))
+            rospy.loginfo(
+                '[SweepingGenerator]: published leader initial altitude reference: %.3f',
+                self.initial_altitude
+            )
+        else:
+            self.updateAltitudeOffset()
+
         # Consume only the required number of GNSS samples to keep a fixed origin offset.
         self.sub_gnss.unregister()
 
     # #} end of callbackGnss
+
+    def callbackLeaderInitialAltitude(self, msg):
+
+        self.leader_initial_altitude = msg.data
+        rospy.loginfo_once(
+            '[SweepingGenerator]: received leader initial altitude reference: %.3f',
+            self.leader_initial_altitude
+        )
+        self.updateAltitudeOffset()
+
+    def updateAltitudeOffset(self):
+
+        if self.leader_swarm:
+            return
+
+        if self.initial_altitude is None or self.leader_initial_altitude is None:
+            return
+
+        offset = self.leader_initial_altitude - self.initial_altitude
+        if (not self.altitude_offset_ready) or abs(offset - self.altitude_offset_z) > 1e-6:
+            self.altitude_offset_z = offset
+            self.altitude_offset_ready = True
+            rospy.loginfo(
+                '[SweepingGenerator]: altitude offset ready (leader-local): %.3f - %.3f = %.3f',
+                self.leader_initial_altitude,
+                self.initial_altitude,
+                self.altitude_offset_z
+            )
 
     # #{ callbackStart():
 
@@ -678,6 +733,13 @@ class Node:
         # Extract leader heading (yaw)
         heading = msg.heading
 
+        if not self.leader_swarm and not self.altitude_offset_ready:
+            rospy.logwarn_throttle(
+                2.0,
+                '[SweepingGenerator]: waiting for altitude offset before follower reference tracking'
+            )
+            return
+
         if self.follower_path == "v_formation":
             # Compute follower offset in leader frame
             dx_body = -self.r * self.wing_index
@@ -707,7 +769,7 @@ class Node:
             point.header.frame_id = self.uav_name + "/" + self.frame_publish
             point.reference.position.x = target_x
             point.reference.position.y = target_y
-            point.reference.position.z = target_z
+            point.reference.position.z = target_z + self.altitude_offset_z
             point.reference.heading = heading
 
             try:
@@ -923,6 +985,16 @@ class Node:
                 rospy.sleep(0.2)
                 continue
 
+            if not self.altitude_offset_ready:
+                rospy.logwarn_throttle(
+                    2.0,
+                    '[SweepingGenerator]: waiting for altitude offset (leader=%.3f, local=%s)',
+                    self.leader_initial_altitude if self.leader_initial_altitude is not None else float('nan'),
+                    'set' if self.initial_altitude is not None else 'pending'
+                )
+                rospy.sleep(0.1)
+                continue
+
             if self.leader_lost and not self.autonomous_fallback:
                 if self.leader_index is not None:
                     self.local_index = self.leader_index
@@ -986,7 +1058,7 @@ class Node:
                     point.header.frame_id = self.uav_name + "/" + self.frame_publish
                     point.reference.position.x = self.offset_waypoint_utm[target_index][0]
                     point.reference.position.y = self.offset_waypoint_utm[target_index][1]
-                    point.reference.position.z = self.offset_waypoint_utm[target_index][2]
+                    point.reference.position.z = self.offset_waypoint_utm[target_index][2] + self.altitude_offset_z
                     point.reference.heading = 0.0
                 else:
                     waypoint = self.waypoint_list[target_index]
@@ -1016,7 +1088,7 @@ class Node:
                     point.header.frame_id = self.uav_name + "/" + "liosam_origin"
                     point.reference.position.x = transform_response.reference.reference.position.x
                     point.reference.position.y = transform_response.reference.reference.position.y
-                    point.reference.position.z = waypoint[2]
+                    point.reference.position.z = waypoint[2] + self.altitude_offset_z
                     point.reference.heading = 0.0
 
                     rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
