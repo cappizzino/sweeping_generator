@@ -501,10 +501,11 @@ class Node:
                 return Vec1Response(False, "no waypoints configured")
 
             self.waypoint_count = 0
-            self.publish_leader_index = False
+            self.publish_leader_index = True
             planner_response = None
 
-            for waypoint in self.waypoint_list:
+            for waypoint_idx, waypoint in enumerate(self.waypoint_list):
+                self.waypoint_count = waypoint_idx
                 rospy.logwarn('[SweepingGenerator]: processing waypoint index: {}'.format(self.waypoint_count))
                 rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
 
@@ -535,6 +536,7 @@ class Node:
                 point.reference.heading = 0.0
 
                 rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
+                self.index_pub.publish(self.waypoint_count)
 
                 try:
                     self.has_goal = False
@@ -561,7 +563,6 @@ class Node:
                     rospy.loginfo('[SweepingGenerator]: waiting for first waypoint completion (self.has_goal == False)')
                     while not rospy.is_shutdown() and self.has_goal:
                         rospy.sleep(0.1)
-                    self.publish_leader_index = True
                     rospy.logwarn('[SweepingGenerator]: first waypoint set. Press Enter to continue with remaining waypoints.')
                     try:
                         input('[SweepingGenerator] Press Enter to continue...')
@@ -572,9 +573,6 @@ class Node:
                     while not rospy.is_shutdown() and self.has_goal:
                         rospy.sleep(0.1)
                     rospy.loginfo('[SweepingGenerator]: waypoint {} completed, moving to next'.format(self.waypoint_count))
-
-                if self.waypoint_count < (len(self.waypoint_list) - 1):
-                    self.waypoint_count += 1
 
             self.publish_leader_index = False
 
