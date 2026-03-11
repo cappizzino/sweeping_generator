@@ -158,6 +158,16 @@ class Node:
             self.departure_time = 0.0
         self.first_leader_index_time = None
         self.departure_released = self.leader_swarm or self.departure_time == 0.0 or self.wing_index == 0
+        self.enable_estimator_change = rospy.get_param('~enable_estimator_change', True)
+        self.estimator_change_timer = float(rospy.get_param('~estimator_change_timer', 0.0))
+        if self.estimator_change_timer < 0.0:
+            rospy.logwarn('[SweepingGenerator]: invalid ~estimator_change_timer=%.3f, using 0.0', self.estimator_change_timer)
+            self.estimator_change_timer = 0.0
+        self.estimator_change_request_value = "liosam"
+        self.flying_normally_since = None
+        self.estimator_change_done = False
+        self.last_estimator_change_attempt = rospy.Time(0)
+        self.estimator_change_retry_period = rospy.Duration(2.0)
         self.fallback_goal_latch_timeout = rospy.get_param('~fallback_goal_latch_timeout', float(self.main_count_max))
         self.fallback_goal_completion_timeout = rospy.get_param('~fallback_goal_completion_timeout', 10.0)
         self.rejoin_policy = rospy.get_param('~rejoin_policy', 'keep_fallback')
@@ -218,9 +228,9 @@ class Node:
         self.sc_transform = rospy.ServiceProxy(service_name, TransformReferenceSrv)
         self.sc_landing = rospy.ServiceProxy(f'/{self.uav_name}/uav_manager/land', Trigger)
 
-        # # Change estimator
-        # service_name = f'/{self.uav_name}/estimation_manager/change_estimator'
-        # self.sc_change_estimator = rospy.ServiceProxy(service_name, String)
+        # Change estimator
+        service_name = f'/{self.uav_name}/estimation_manager/change_estimator'
+        self.sc_change_estimator = rospy.ServiceProxy(service_name, String)
 
         # rospy.loginfo('[SweepingGenerator]: all service clients initialized')
         # rospy.loginfo('[SweepingGenerator]: sleeping for 1 second before changing estimator')
@@ -373,6 +383,54 @@ class Node:
         rospy.loginfo_once('[SweepingGenerator]: getting ControlManager diagnostics')
 
         self.sub_control_manager_diag = msg
+
+        if not self.enable_estimator_change:
+            return
+
+        if self.estimator_change_done:
+            return
+
+        if msg.flying_normally:
+            if self.flying_normally_since is None:
+                self.flying_normally_since = rospy.Time.now()
+                rospy.loginfo(
+                    '[SweepingGenerator]: flying_normally detected, estimator change scheduled in %.2fs',
+                    self.estimator_change_timer
+                )
+
+            elapsed = (rospy.Time.now() - self.flying_normally_since).to_sec()
+            if elapsed < self.estimator_change_timer:
+                return
+
+            now = rospy.Time.now()
+            if (now - self.last_estimator_change_attempt) < self.estimator_change_retry_period:
+                return
+            self.last_estimator_change_attempt = now
+
+            req = StringRequest()
+            req.value = self.estimator_change_request_value
+
+            try:
+                result = self.sc_change_estimator(req)
+                if result.success:
+                    self.estimator_change_done = True
+                    rospy.loginfo(
+                        "[SweepingGenerator]: estimator changed to '%s' after %.2fs flying_normally",
+                        req.value,
+                        elapsed
+                    )
+                else:
+                    rospy.logwarn(
+                        "[SweepingGenerator]: estimator change to '%s' failed: %s",
+                        req.value,
+                        result.message
+                    )
+            except rospy.ServiceException as e:
+                rospy.logwarn("[SweepingGenerator]: estimator change service call failed: %s", str(e))
+        else:
+            if self.flying_normally_since is not None:
+                rospy.loginfo('[SweepingGenerator]: flying_normally lost before estimator change, resetting timer')
+            self.flying_normally_since = None
 
     # #} end of callbackControlManagerDiagnostics
 
