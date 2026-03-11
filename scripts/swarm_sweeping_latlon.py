@@ -189,8 +189,7 @@ class Node:
             self.initial_altitude_pub = rospy.Publisher(
                 f"/{self.uav_name}/initial_altitude",
                 Float64,
-                queue_size=1,
-                latch=True
+                queue_size=1
             )
         else:
             self.ref_pub = rospy.Publisher(f"/{self.uav_name}/control_manager/reference", ReferenceStamped, queue_size=1)
@@ -448,9 +447,8 @@ class Node:
             self.leader_initial_altitude = self.initial_altitude
             self.altitude_offset_z = 0.0
             self.altitude_offset_ready = True
-            self.initial_altitude_pub.publish(Float64(data=self.initial_altitude))
             rospy.loginfo(
-                '[SweepingGenerator]: published leader initial altitude reference: %.3f',
+                '[SweepingGenerator]: leader initial altitude reference ready: %.3f',
                 self.initial_altitude
             )
         else:
@@ -848,6 +846,10 @@ class Node:
         
         self.main_count += 1
         # rospy.loginfo('[SweepingGenerator]: Flag: {}'.format(self.main_count))
+
+        # Periodically publish leader initial altitude for networked followers.
+        if self.leader_swarm and self.initial_altitude is not None:
+            self.initial_altitude_pub.publish(Float64(data=self.initial_altitude))
 
     # #} end of timerMain()
 
