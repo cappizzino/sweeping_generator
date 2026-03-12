@@ -230,6 +230,7 @@ class Node:
         self.sc_octomap_planner_vec = rospy.ServiceProxy(f'/{self.uav_name}/octomap_planner/goto', Vec4)
         self.sc_octomap_planner_stop = rospy.ServiceProxy(f'/{self.uav_name}/octomap_planner/stop', Trigger)
         self.sc_set_relative_heading = rospy.ServiceProxy(f'/{self.uav_name}/control_manager/set_heading_relative', Vec1)
+        self.sc_disable_altitude_fusion = rospy.ServiceProxy('fast_lio/disable_altitude_fusion', Trigger)
 
         service_name = f'/{self.uav_name}/control_manager/transform_reference'
         rospy.loginfo('[SweepingGenerator]: waiting for service: {}'.format(service_name))
@@ -418,6 +419,16 @@ class Node:
                 set_heading.goal = -1.5
                 rospy.loginfo('[SweepingGenerator]: relative heading set to %.2f radians', set_heading.goal)
                 self.sc_set_relative_heading(set_heading)
+
+                try:
+                    response = self.sc_disable_altitude_fusion()
+                    if response.success:
+                        rospy.loginfo('[SweepingGenerator]: fast_lio altitude fusion disabled')
+                    else:
+                        rospy.logwarn('[SweepingGenerator]: failed to disable fast_lio altitude fusion: %s', response.message)
+                except rospy.ServiceException as e:
+                    rospy.logwarn('[SweepingGenerator]: fast_lio/disable_altitude_fusion service call failed: %s', str(e))
+
                 rospy.sleep(3.0)
 
             elapsed = (rospy.Time.now() - self.flying_normally_since).to_sec()
