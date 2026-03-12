@@ -7,10 +7,11 @@ import tf2_geometry_msgs
 import math
 import utm
 from mrs_msgs.msg import ControlManagerDiagnostics,Reference, ReferenceStamped
+from mrs_msgs.srv import Vec4, Vec4Request
 from mrs_modules_msgs.msg import OctomapPlannerDiagnostics
 from mrs_msgs.srv import PathSrv,PathSrvRequest, ReferenceStampedSrv, ReferenceStampedSrvRequest
 from mrs_msgs.srv import TransformReferenceSrv, TransformReferenceSrvRequest
-from mrs_msgs.srv import Vec1,Vec1Response
+from mrs_msgs.srv import Vec1, Vec1Request, Vec1Response
 from mrs_msgs.srv import String, StringRequest
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import NavSatFix
@@ -73,6 +74,13 @@ class Node:
         self.side = rospy.get_param("~side")
 
         self.octomap_planner_set = rospy.get_param("~octomap_planner_set", True)
+        self.octomap_request_type = str(rospy.get_param("~octomap_request_type", "reference_stamped")).strip().lower()
+        if self.octomap_request_type not in ["reference_stamped", "vec4"]:
+            rospy.logwarn(
+                "[SweepingGenerator]: invalid ~octomap_request_type='%s', using 'reference_stamped'",
+                self.octomap_request_type
+            )
+            self.octomap_request_type = "reference_stamped"
         self.leader_reference_set = rospy.get_param("~leader_reference_set", False)
         self.heading_leader_zero = rospy.get_param("~heading_leader_zero", False)
 
@@ -219,7 +227,9 @@ class Node:
         if self.leader_swarm:
             self.sc_path = rospy.ServiceProxy('~path_out', PathSrv)
         self.sc_octomap_planner = rospy.ServiceProxy(f'/{self.uav_name}/octomap_planner/reference', ReferenceStampedSrv)
+        self.sc_octomap_planner_vec = rospy.ServiceProxy(f'/{self.uav_name}/octomap_planner/goto', Vec4)
         self.sc_octomap_planner_stop = rospy.ServiceProxy(f'/{self.uav_name}/octomap_planner/stop', Trigger)
+        self.sc_set_relative_heading = rospy.ServiceProxy(f'/{self.uav_name}/control_manager/set_heading_relative', Vec1)
 
         service_name = f'/{self.uav_name}/control_manager/transform_reference'
         rospy.loginfo('[SweepingGenerator]: waiting for service: {}'.format(service_name))
@@ -398,6 +408,18 @@ class Node:
                     self.estimator_change_timer
                 )
 
+                set_heading = Vec1Request()
+                set_heading.goal = 1.5
+                rospy.loginfo('[SweepingGenerator]: relative heading set to %.2f radians', set_heading.goal)
+                self.sc_set_relative_heading(set_heading)
+                rospy.sleep(3.0)
+
+                set_heading = Vec1Request()
+                set_heading.goal = -1.5
+                rospy.loginfo('[SweepingGenerator]: relative heading set to %.2f radians', set_heading.goal)
+                self.sc_set_relative_heading(set_heading)
+                rospy.sleep(3.0)
+
             elapsed = (rospy.Time.now() - self.flying_normally_since).to_sec()
             if elapsed < self.estimator_change_timer:
                 return
@@ -551,6 +573,29 @@ class Node:
                 self.altitude_offset_z
             )
 
+    def build_octomap_request(self, frame_id, x, y, z, heading=0.0):
+
+        if self.octomap_request_type == "vec4":
+            point = Vec4Request()
+            point.goal = [x, y, z, heading]
+            return point
+
+        point = ReferenceStampedSrvRequest()
+        point.header.stamp = rospy.Time.now()
+        point.header.frame_id = frame_id
+        point.reference.position.x = x
+        point.reference.position.y = y
+        point.reference.position.z = z
+        point.reference.heading = heading
+        return point
+
+    def call_octomap_planner(self, point):
+
+        if self.octomap_request_type == "vec4":
+            return self.sc_octomap_planner_vec.call(point)
+
+        return self.sc_octomap_planner.call(point)
+
     # #{ callbackStart():
 
     def callbackStart(self, req):
@@ -591,20 +636,23 @@ class Node:
                     rospy.logerr(f"Service call failed: {e}")
                     return Vec1Response(False, "transform reference failed")
 
-                point = ReferenceStampedSrvRequest()
-                point.header.stamp = rospy.Time.now()
-                point.header.frame_id = self.uav_name + "/" + "liosam_origin"
-                point.reference.position.x = transform_response.reference.reference.position.x
-                point.reference.position.y = transform_response.reference.reference.position.y
-                point.reference.position.z = waypoint[2]
-                point.reference.heading = 0.0
+                point = self.build_octomap_request(
+                    self.uav_name + "/" + "liosam_origin",
+                    transform_response.reference.reference.position.x,
+                    transform_response.reference.reference.position.y,
+                    waypoint[2],
+                    0.0
+                )
 
-                rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
+                if self.octomap_request_type == "vec4":
+                    rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.goal[0], point.goal[1], point.goal[2]))
+                else:
+                    rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
                 self.index_pub.publish(self.waypoint_count)
 
                 try:
                     self.has_goal = False
-                    planner_response = self.sc_octomap_planner.call(point)
+                    planner_response = self.call_octomap_planner(point)
                     rospy.loginfo(f"Response: success={planner_response.success}, message='{planner_response.message}'")
                 except rospy.ServiceException as e:
                     rospy.logerr(f"[SweepingGenerator]: octomap planner service not callable: {e}")
@@ -717,15 +765,15 @@ class Node:
                 rospy.logerr(f'[SweepingGenerator]: {msg}')
                 failures.append(msg)
             else:
-                point = ReferenceStampedSrvRequest()
-                point.header.stamp = rospy.Time.now()
-                point.header.frame_id = self.uav_name + "/" + "liosam_origin"
-                point.reference.position.x = transform_response.reference.reference.position.x
-                point.reference.position.y = transform_response.reference.reference.position.y
-                point.reference.position.z = self.emergency_hover_z
-                point.reference.heading = 0.0
+                point = self.build_octomap_request(
+                    self.uav_name + "/" + "liosam_origin",
+                    transform_response.reference.reference.position.x,
+                    transform_response.reference.reference.position.y,
+                    self.emergency_hover_z,
+                    0.0
+                )
 
-                clear_resp = self.sc_octomap_planner.call(point)
+                clear_resp = self.call_octomap_planner(point)
                 if clear_resp.success:
                     rospy.loginfo('[SweepingGenerator]: Octomap planner path cleared successfully')
                 else:
@@ -824,19 +872,19 @@ class Node:
         target_z = z  # same altitude
 
         if self.octomap_planner_set:
-            point = ReferenceStampedSrvRequest()
-            point.header.stamp = rospy.Time.now()
-            point.header.frame_id = self.uav_name + "/" + self.frame_publish
-            point.reference.position.x = target_x
-            point.reference.position.y = target_y
-            point.reference.position.z = target_z + self.altitude_offset_z
-            point.reference.heading = heading
+            point = self.build_octomap_request(
+                self.uav_name + "/" + self.frame_publish,
+                target_x,
+                target_y,
+                target_z + self.altitude_offset_z,
+                heading
+            )
 
             try:
-                response = self.sc_octomap_planner.call(point)
-            except:
-                rospy.logerr('[SweepingGenerator]: octomap planner service not callable')
-                pass
+                response = self.call_octomap_planner(point)
+            except rospy.ServiceException as e:
+                rospy.logerr('[SweepingGenerator]: octomap planner service not callable: %s', str(e))
+                return
 
             if response.success:
                 rospy.loginfo('[SweepingGenerator]: octomap planner set for follower')
@@ -1152,13 +1200,13 @@ class Node:
 
             if self.last_sent_index != target_index:
                 if self.offset_waypoint_utm_flag:
-                    point = ReferenceStampedSrvRequest()
-                    point.header.stamp = rospy.Time.now()
-                    point.header.frame_id = self.uav_name + "/" + self.frame_publish
-                    point.reference.position.x = self.offset_waypoint_utm[target_index][0]
-                    point.reference.position.y = self.offset_waypoint_utm[target_index][1]
-                    point.reference.position.z = self.offset_waypoint_utm[target_index][2] + self.altitude_offset_z
-                    point.reference.heading = 0.0
+                    point = self.build_octomap_request(
+                        self.uav_name + "/" + self.frame_publish,
+                        self.offset_waypoint_utm[target_index][0],
+                        self.offset_waypoint_utm[target_index][1],
+                        self.offset_waypoint_utm[target_index][2] + self.altitude_offset_z,
+                        0.0
+                    )
                 else:
                     waypoint = self.waypoint_list[target_index]
                     rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
@@ -1182,19 +1230,22 @@ class Node:
                         rospy.sleep(0.2)
                         continue
 
-                    point = ReferenceStampedSrvRequest()
-                    point.header.stamp = rospy.Time.now()
-                    point.header.frame_id = self.uav_name + "/" + "liosam_origin"
-                    point.reference.position.x = transform_response.reference.reference.position.x
-                    point.reference.position.y = transform_response.reference.reference.position.y
-                    point.reference.position.z = waypoint[2] + self.altitude_offset_z
-                    point.reference.heading = 0.0
+                    point = self.build_octomap_request(
+                        self.uav_name + "/" + "liosam_origin",
+                        transform_response.reference.reference.position.x,
+                        transform_response.reference.reference.position.y,
+                        waypoint[2] + self.altitude_offset_z,
+                        0.0
+                    )
 
-                    rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
+                    if self.octomap_request_type == "vec4":
+                        rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.goal[0], point.goal[1], point.goal[2]))
+                    else:
+                        rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
 
                 try:
                     self.has_goal = False
-                    response = self.sc_octomap_planner.call(point)
+                    response = self.call_octomap_planner(point)
                     rospy.loginfo(f"Response: success={response.success}, message='{response.message}'")
                 except rospy.ServiceException as e:
                     rospy.logerr(f'[SweepingGenerator]: octomap planner service not callable: {e}')

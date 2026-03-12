@@ -32,3 +32,4 @@ lateral_scale: 1.0
 side: 6.0
 
 octomap_planner_set: true
+octomap_request_type: "reference_stamped" # {"reference_stamped","vec4"}
