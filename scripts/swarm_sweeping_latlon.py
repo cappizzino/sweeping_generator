@@ -11,6 +11,7 @@ from mrs_msgs.srv import Vec4, Vec4Request
 from mrs_modules_msgs.msg import OctomapPlannerDiagnostics
 from mrs_msgs.srv import PathSrv,PathSrvRequest, ReferenceStampedSrv, ReferenceStampedSrvRequest
 from mrs_msgs.srv import TransformReferenceSrv, TransformReferenceSrvRequest
+from mrs_msgs.srv import Vec4, Vec4Request
 from mrs_msgs.srv import Vec1, Vec1Request, Vec1Response
 from mrs_msgs.srv import String, StringRequest
 from nav_msgs.msg import Odometry
@@ -232,6 +233,19 @@ class Node:
         self.sc_set_relative_heading = rospy.ServiceProxy(f'/{self.uav_name}/control_manager/set_heading_relative', Vec1)
         self.sc_disable_altitude_fusion = rospy.ServiceProxy('fast_lio/disable_altitude_fusion', Trigger)
 
+        # This service is to set the relative heading control
+        self.sc_set_relative_heading_enable = rospy.get_param('~set_relative_heading_enable', True)
+        self.sc_set_relative_heading_value = rospy.get_param('~set_relative_heading_value', 3.1)
+        self.sc_set_relative_heading = rospy.ServiceProxy(f'/{self.uav_name}/control_manager/set_heading_relative', Vec1)
+
+        # This service is expected to be available only if the UAV is configured to use fast_lio with altitude fusion that can be disabled.
+        self.sc_disable_altitude_fusion_enable = rospy.get_param('~disable_altitude_fusion_enable', True)
+        self.sc_disable_altitude_fusion = rospy.ServiceProxy('fast_lio/disable_altitude_fusion', Trigger)
+
+        # Capture altitude service is optional, used to latch the current altitude as reference before switching estimator.
+        self.sc_capture_altitude_enable = rospy.get_param('~capture_altitude_enable', False)
+        self.sc_capture_altitude = rospy.ServiceProxy('odom_altitude_offset/capture_altitude', Trigger)
+
         service_name = f'/{self.uav_name}/control_manager/transform_reference'
         rospy.loginfo('[SweepingGenerator]: waiting for service: {}'.format(service_name))
         rospy.wait_for_service(service_name)
@@ -408,6 +422,46 @@ class Node:
                     '[SweepingGenerator]: flying_normally detected, estimator change scheduled in %.2fs',
                     self.estimator_change_timer
                 )
+
+                if self.sc_capture_altitude_enable:
+                    try:
+                        response = self.sc_capture_altitude()
+                        rospy.sleep(0.5)
+                        if response.success:
+                            rospy.loginfo('[SweepingGenerator]: capture_altitude service called successfully')
+                        else:
+                            rospy.logwarn('[SweepingGenerator]: capture_altitude service call failed: %s', response.message)
+                    except rospy.ServiceException as e:
+                        rospy.logwarn('[SweepingGenerator]: capture_altitude service call failed: %s', str(e))
+                else:
+                    rospy.logwarn('[SweepingGenerator]: capture_altitude disabled')
+
+                if self.sc_set_relative_heading_enable:
+                    set_heading = Vec1Request()
+                    set_heading.goal = self.sc_set_relative_heading_value
+                    rospy.loginfo('[SweepingGenerator]: relative heading set to %.2f radians', set_heading.goal)
+                    self.sc_set_relative_heading(set_heading)
+                    rospy.sleep(7.0)
+
+                    set_heading = Vec1Request()
+                    set_heading.goal = -self.sc_set_relative_heading_value
+                    rospy.loginfo('[SweepingGenerator]: relative heading set to %.2f radians', set_heading.goal)
+                    self.sc_set_relative_heading(set_heading)
+                    rospy.sleep(7.0)
+                else:
+                    rospy.logwarn('[SweepingGenerator]: set_relative_heading service not enabled')
+
+                if self.sc_disable_altitude_fusion_enable:
+                    try:
+                        response = self.sc_disable_altitude_fusion()
+                        if response.success:
+                            rospy.loginfo('[SweepingGenerator]: fast_lio altitude fusion disabled')
+                        else:
+                            rospy.logwarn('[SweepingGenerator]: failed to disable fast_lio altitude fusion: %s', response.message)
+                    except rospy.ServiceException as e:
+                        rospy.logwarn('[SweepingGenerator]: fast_lio/disable_altitude_fusion service call failed: %s', str(e))
+                else:
+                    rospy.logwarn('[SweepingGenerator]: fast_lio altitude fusion disable service not enabled')
 
                 set_heading = Vec1Request()
                 set_heading.goal = 1.5
@@ -647,6 +701,21 @@ class Node:
                     rospy.logerr(f"Service call failed: {e}")
                     return Vec1Response(False, "transform reference failed")
 
+                # point = ReferenceStampedSrvRequest()
+                # point.header.stamp = rospy.Time.now()
+                # point.header.frame_id = self.uav_name + "/" + "liosam_origin"
+                # point.reference.position.x = transform_response.reference.reference.position.x
+                # point.reference.position.y = transform_response.reference.reference.position.y
+                # point.reference.position.z = waypoint[2]
+                # point.reference.heading = 0.0
+
+                point = Vec4Request()
+                point.goal[0] = transform_response.reference.reference.position.x
+                point.goal[1] = transform_response.reference.reference.position.y
+                point.goal[2] = waypoint[2]
+                point.goal[3] = 0.0
+
+                rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.goal[0], point.goal[1], point.goal[2]))
                 point = self.build_octomap_request(
                     self.uav_name + "/" + "liosam_origin",
                     transform_response.reference.reference.position.x,
@@ -663,6 +732,7 @@ class Node:
 
                 try:
                     self.has_goal = False
+                    planner_response = self.sc_octomap_planner_vec.call(point)
                     planner_response = self.call_octomap_planner(point)
                     rospy.loginfo(f"Response: success={planner_response.success}, message='{planner_response.message}'")
                 except rospy.ServiceException as e:
