@@ -81,7 +81,7 @@ class Node:
                 "[SweepingGenerator]: invalid ~octomap_request_type='%s', using 'reference_stamped'",
                 self.octomap_request_type
             )
-            self.octomap_request_type = "reference_stamped"
+            self.octomap_request_type = "vec4"
         self.leader_reference_set = rospy.get_param("~leader_reference_set", False)
         self.heading_leader_zero = rospy.get_param("~heading_leader_zero", False)
 
@@ -463,28 +463,6 @@ class Node:
                 else:
                     rospy.logwarn('[SweepingGenerator]: fast_lio altitude fusion disable service not enabled')
 
-                set_heading = Vec1Request()
-                set_heading.goal = 1.5
-                rospy.loginfo('[SweepingGenerator]: relative heading set to %.2f radians', set_heading.goal)
-                self.sc_set_relative_heading(set_heading)
-                rospy.sleep(3.0)
-
-                set_heading = Vec1Request()
-                set_heading.goal = -1.5
-                rospy.loginfo('[SweepingGenerator]: relative heading set to %.2f radians', set_heading.goal)
-                self.sc_set_relative_heading(set_heading)
-
-                try:
-                    response = self.sc_disable_altitude_fusion()
-                    if response.success:
-                        rospy.loginfo('[SweepingGenerator]: fast_lio altitude fusion disabled')
-                    else:
-                        rospy.logwarn('[SweepingGenerator]: failed to disable fast_lio altitude fusion: %s', response.message)
-                except rospy.ServiceException as e:
-                    rospy.logwarn('[SweepingGenerator]: fast_lio/disable_altitude_fusion service call failed: %s', str(e))
-
-                rospy.sleep(3.0)
-
             elapsed = (rospy.Time.now() - self.flying_normally_since).to_sec()
             if elapsed < self.estimator_change_timer:
                 return
@@ -691,7 +669,8 @@ class Node:
                 ref.reference.heading = 0.0
 
                 request = TransformReferenceSrvRequest()
-                request.frame_id = self.uav_name + "/" + "liosam_origin"
+                # request.frame_id = self.uav_name + "/" + "world_origin"
+                request.frame_id = self.uav_name + "/" + "world_origin"
                 request.reference = ref
 
                 try:
@@ -703,21 +682,21 @@ class Node:
 
                 # point = ReferenceStampedSrvRequest()
                 # point.header.stamp = rospy.Time.now()
-                # point.header.frame_id = self.uav_name + "/" + "liosam_origin"
+                # point.header.frame_id = self.uav_name + "/" + "world_origin"
                 # point.reference.position.x = transform_response.reference.reference.position.x
                 # point.reference.position.y = transform_response.reference.reference.position.y
                 # point.reference.position.z = waypoint[2]
                 # point.reference.heading = 0.0
 
-                point = Vec4Request()
-                point.goal[0] = transform_response.reference.reference.position.x
-                point.goal[1] = transform_response.reference.reference.position.y
-                point.goal[2] = waypoint[2]
-                point.goal[3] = 0.0
+                # point = Vec4Request()
+                # point.goal[0] = transform_response.reference.reference.position.x
+                # point.goal[1] = transform_response.reference.reference.position.y
+                # point.goal[2] = waypoint[2]
+                # point.goal[3] = 0.0
 
-                rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.goal[0], point.goal[1], point.goal[2]))
+                # rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.goal[0], point.goal[1], point.goal[2]))
                 point = self.build_octomap_request(
-                    self.uav_name + "/" + "liosam_origin",
+                    self.uav_name + "/" + "world_origin",
                     transform_response.reference.reference.position.x,
                     transform_response.reference.reference.position.y,
                     waypoint[2],
@@ -732,7 +711,7 @@ class Node:
 
                 try:
                     self.has_goal = False
-                    planner_response = self.sc_octomap_planner_vec.call(point)
+                    # planner_response = self.sc_octomap_planner_vec.call(point)
                     planner_response = self.call_octomap_planner(point)
                     rospy.loginfo(f"Response: success={planner_response.success}, message='{planner_response.message}'")
                 except rospy.ServiceException as e:
@@ -837,7 +816,7 @@ class Node:
             ref.reference.heading = 0.0
 
             request = TransformReferenceSrvRequest()
-            request.frame_id = self.uav_name + "/" + "liosam_origin"
+            request.frame_id = self.uav_name + "/" + "world_origin"
             request.reference = ref
 
             transform_response = self.sc_transform(request)
@@ -847,7 +826,7 @@ class Node:
                 failures.append(msg)
             else:
                 point = self.build_octomap_request(
-                    self.uav_name + "/" + "liosam_origin",
+                    self.uav_name + "/" + "world_origin",
                     transform_response.reference.reference.position.x,
                     transform_response.reference.reference.position.y,
                     self.emergency_hover_z,
@@ -1300,7 +1279,7 @@ class Node:
                     ref.reference.heading = 0.0
 
                     request = TransformReferenceSrvRequest()
-                    request.frame_id = self.uav_name + "/" + "liosam_origin"
+                    request.frame_id = self.uav_name + "/" + "world_origin"
                     request.reference = ref
 
                     try:
@@ -1312,7 +1291,7 @@ class Node:
                         continue
 
                     point = self.build_octomap_request(
-                        self.uav_name + "/" + "liosam_origin",
+                        self.uav_name + "/" + "world_origin",
                         transform_response.reference.reference.position.x,
                         transform_response.reference.reference.position.y,
                         waypoint[2] + self.altitude_offset_z,
