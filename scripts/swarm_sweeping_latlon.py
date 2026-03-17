@@ -669,8 +669,8 @@ class Node:
                 ref.reference.heading = 0.0
 
                 request = TransformReferenceSrvRequest()
-                # request.frame_id = self.uav_name + "/" + "world_origin"
-                request.frame_id = self.uav_name + "/" + "world_origin"
+                # request.frame_id = self.uav_name + "/" + "stable_origin"
+                request.frame_id = self.uav_name + "/" + "stable_origin"
                 request.reference = ref
 
                 try:
@@ -682,7 +682,7 @@ class Node:
 
                 # point = ReferenceStampedSrvRequest()
                 # point.header.stamp = rospy.Time.now()
-                # point.header.frame_id = self.uav_name + "/" + "world_origin"
+                # point.header.frame_id = self.uav_name + "/" + "stable_origin"
                 # point.reference.position.x = transform_response.reference.reference.position.x
                 # point.reference.position.y = transform_response.reference.reference.position.y
                 # point.reference.position.z = waypoint[2]
@@ -696,7 +696,7 @@ class Node:
 
                 # rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.goal[0], point.goal[1], point.goal[2]))
                 point = self.build_octomap_request(
-                    self.uav_name + "/" + "world_origin",
+                    self.uav_name + "/" + "stable_origin",
                     transform_response.reference.reference.position.x,
                     transform_response.reference.reference.position.y,
                     waypoint[2],
@@ -816,7 +816,7 @@ class Node:
             ref.reference.heading = 0.0
 
             request = TransformReferenceSrvRequest()
-            request.frame_id = self.uav_name + "/" + "world_origin"
+            request.frame_id = self.uav_name + "/" + "stable_origin"
             request.reference = ref
 
             transform_response = self.sc_transform(request)
@@ -826,7 +826,7 @@ class Node:
                 failures.append(msg)
             else:
                 point = self.build_octomap_request(
-                    self.uav_name + "/" + "world_origin",
+                    self.uav_name + "/" + "stable_origin",
                     transform_response.reference.reference.position.x,
                     transform_response.reference.reference.position.y,
                     self.emergency_hover_z,
@@ -1279,7 +1279,7 @@ class Node:
                     ref.reference.heading = 0.0
 
                     request = TransformReferenceSrvRequest()
-                    request.frame_id = self.uav_name + "/" + "world_origin"
+                    request.frame_id = self.uav_name + "/" + "stable_origin"
                     request.reference = ref
 
                     try:
@@ -1291,7 +1291,7 @@ class Node:
                         continue
 
                     point = self.build_octomap_request(
-                        self.uav_name + "/" + "world_origin",
+                        self.uav_name + "/" + "stable_origin",
                         transform_response.reference.reference.position.x,
                         transform_response.reference.reference.position.y,
                         waypoint[2] + self.altitude_offset_z,
