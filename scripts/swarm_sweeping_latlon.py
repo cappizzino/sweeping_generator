@@ -129,7 +129,7 @@ class Node:
         self.offset_waypoint_utm = []
         self.waypoint_count = 0
         self.publish_leader_index = False
-        # self.waypoint_frame = rospy.get_param('~waypoint_frame', "fixed_origin")
+        self.waypoint_frame = rospy.get_param('~waypoint_frame', "world_origin")
         self.leader_index = None
         self.local_index = None
         self.autonomous_fallback = False
@@ -669,8 +669,7 @@ class Node:
                 ref.reference.heading = 0.0
 
                 request = TransformReferenceSrvRequest()
-                # request.frame_id = self.uav_name + "/" + "stable_origin"
-                request.frame_id = self.uav_name + "/" + "stable_origin"
+                request.frame_id = self.uav_name + "/" + self.waypoint_frame
                 request.reference = ref
 
                 try:
@@ -680,9 +679,11 @@ class Node:
                     rospy.logerr(f"Service call failed: {e}")
                     return Vec1Response(False, "transform reference failed")
 
+                rospy.loginfo('[SweepingGenerator]: transformed waypoint coordinates: x: {}, y: {}, z: {}, frame: {}'.format(transform_response.reference.reference.position.x, transform_response.reference.reference.position.y, transform_response.reference.reference.position.z, transform_response.reference.header.frame_id))
+
                 # point = ReferenceStampedSrvRequest()
                 # point.header.stamp = rospy.Time.now()
-                # point.header.frame_id = self.uav_name + "/" + "stable_origin"
+                # point.header.frame_id = self.uav_name + "/" + self.waypoint_frame
                 # point.reference.position.x = transform_response.reference.reference.position.x
                 # point.reference.position.y = transform_response.reference.reference.position.y
                 # point.reference.position.z = waypoint[2]
@@ -696,7 +697,7 @@ class Node:
 
                 # rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.goal[0], point.goal[1], point.goal[2]))
                 point = self.build_octomap_request(
-                    self.uav_name + "/" + "stable_origin",
+                    self.uav_name + "/" + self.waypoint_frame,
                     transform_response.reference.reference.position.x,
                     transform_response.reference.reference.position.y,
                     waypoint[2],
@@ -816,7 +817,7 @@ class Node:
             ref.reference.heading = 0.0
 
             request = TransformReferenceSrvRequest()
-            request.frame_id = self.uav_name + "/" + "stable_origin"
+            request.frame_id = self.uav_name + "/" + self.waypoint_frame
             request.reference = ref
 
             transform_response = self.sc_transform(request)
@@ -826,7 +827,7 @@ class Node:
                 failures.append(msg)
             else:
                 point = self.build_octomap_request(
-                    self.uav_name + "/" + "stable_origin",
+                    self.uav_name + "/" + self.waypoint_frame,
                     transform_response.reference.reference.position.x,
                     transform_response.reference.reference.position.y,
                     self.emergency_hover_z,
@@ -1279,7 +1280,7 @@ class Node:
                     ref.reference.heading = 0.0
 
                     request = TransformReferenceSrvRequest()
-                    request.frame_id = self.uav_name + "/" + "stable_origin"
+                    request.frame_id = self.uav_name + "/" + self.waypoint_frame
                     request.reference = ref
 
                     try:
@@ -1291,7 +1292,7 @@ class Node:
                         continue
 
                     point = self.build_octomap_request(
-                        self.uav_name + "/" + "stable_origin",
+                        self.uav_name + "/" + self.waypoint_frame,
                         transform_response.reference.reference.position.x,
                         transform_response.reference.reference.position.y,
                         waypoint[2] + self.altitude_offset_z,
