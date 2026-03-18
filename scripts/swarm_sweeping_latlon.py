@@ -6,7 +6,7 @@ import tf2_ros
 import tf2_geometry_msgs
 import math
 import utm
-from mrs_msgs.msg import ControlManagerDiagnostics,Reference, ReferenceStamped
+from mrs_msgs.msg import ControlManagerDiagnostics,Reference, ReferenceStamped, HwApiRcChannels
 from mrs_msgs.srv import Vec4, Vec4Request
 from mrs_modules_msgs.msg import OctomapPlannerDiagnostics
 from mrs_msgs.srv import PathSrv,PathSrvRequest, ReferenceStampedSrv, ReferenceStampedSrvRequest
@@ -18,7 +18,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import PoseStamped, PoseArray
 from std_msgs.msg import UInt8, Float64
-from std_srvs.srv import Trigger, TriggerResponse
+from std_srvs.srv import Trigger, TriggerResponse, TriggerRequest
 from rospy import ServiceException
 from waypoints_latlog import SwarmInputs, compute_swarm_waypoint_lines
 
@@ -184,6 +184,20 @@ class Node:
             rospy.logwarn("[SweepingGenerator]: invalid ~rejoin_policy='%s', using 'keep_fallback'", self.rejoin_policy)
             self.rejoin_policy = 'keep_fallback'
 
+        self.emergency_active = False
+        self.emergency_rc_active = False
+        self.emergency_rc_succeeded = False
+        self.rc_emergency_threshold = float(rospy.get_param('~rc_emergency_threshold', 0.7))
+        self.rc_emergency_retry_period = rospy.Duration(float(rospy.get_param('~rc_emergency_retry_period', 1.0)))
+        self.rc_emergency_timer_rate = float(rospy.get_param('~rc_emergency_timer_rate', 10.0))
+        if self.rc_emergency_timer_rate <= 0.0:
+            rospy.logwarn('[SweepingGenerator]: invalid ~rc_emergency_timer_rate=%.3f, using 10.0', self.rc_emergency_timer_rate)
+            self.rc_emergency_timer_rate = 10.0
+        self.rc_message_timeout = rospy.Duration(float(rospy.get_param('~rc_message_timeout', 1.0)))
+        self.last_emergency_attempt = rospy.Time(0)
+        self.last_rc_message_time = rospy.Time(0)
+        self.rc_emergency_button_on = False
+        self.rc_emergency_call_in_progress = False
         rospy.loginfo('[SweepingGenerator]: initialized')
 
         ## | ----------------------- subscribers ---------------------- |
@@ -206,6 +220,9 @@ class Node:
             )
         self.sub_control_manager_diag = rospy.Subscriber("~control_manager_diag_in", ControlManagerDiagnostics, self.callbackControlManagerDiagnostics)
         self.sub_octomap_planner_diag = rospy.Subscriber("~octomap_planner_diag_in", OctomapPlannerDiagnostics, self.callbackOctomapPlannerDiagnostics)
+
+        # Subscriber Radio Controller
+        self.sub_rc_channels = rospy.Subscriber('hw_api/rc_channels', HwApiRcChannels, self.rc_callback, queue_size=1)
 
         ## | ----------------------- publishers ---------------------- |
         if self.leader_swarm:
@@ -275,6 +292,7 @@ class Node:
             self.timer_index = rospy.Timer(rospy.Duration(1.0/self.timer_pose_rate), self.timerIndex)
         else:
             self.timer_comm = rospy.Timer(rospy.Duration(1.0/self.timer_comm_rate), self.timerComm)
+        self.timer_rc_emergency = rospy.Timer(rospy.Duration(1.0/self.rc_emergency_timer_rate), self.timerRcEmergency)
 
         ## | -------------------- spin till the end ------------------- |
 
@@ -511,6 +529,36 @@ class Node:
         self.sub_octomap_planner_diag = msg
 
     # #} end of callbackOctomapPlannerDiagnostics
+
+    # #{ callbackRcChannels():
+
+    def rc_callback(self, msg):
+
+        if not self.is_initialized:
+            return
+        
+        rospy.loginfo_once('[SweepingGenerator]: RC channels received')
+
+        if len(msg.channels) <= 11:
+            rospy.logwarn_throttle(2.0, '[SweepingGenerator]: RC channels do not contain index 11')
+            return
+
+        now = rospy.Time.now()
+        self.last_rc_message_time = now
+
+        rc_button_on = msg.channels[11] > self.rc_emergency_threshold
+        if rc_button_on != self.rc_emergency_button_on:
+            if rc_button_on:
+                rospy.logwarn('[SweepingGenerator]: RC emergency button pressed')
+                self.emergency_rc_succeeded = False
+            else:
+                rospy.loginfo('[SweepingGenerator]: RC emergency button released, stopping retries')
+                self.emergency_rc_active = False
+                self.emergency_rc_succeeded = False
+
+        self.rc_emergency_button_on = rc_button_on
+
+    # #} end of callbackRcChannels
 
     # #{ callbackOdom():
 
@@ -782,11 +830,11 @@ class Node:
         rospy.logwarn('[SweepingGenerator]: Emergency stop triggered')
 
         # Optional: prevent duplicate execution
-        if getattr(self, 'emergency_active', False):
-            rospy.logwarn('[SweepingGenerator]: Emergency already active')
-            return TriggerResponse(success=True, message='emergency already active')
+        # if getattr(self, 'emergency_active', False):
+        #     rospy.logwarn('[SweepingGenerator]: Emergency already active')
+        #     return TriggerResponse(success=True, message='emergency already active')
 
-        self.emergency_active = True
+        # self.emergency_active = True
 
         failures = []
 
@@ -833,7 +881,8 @@ class Node:
                     self.emergency_hover_z,
                     0.0
                 )
-
+                rospy.loginfo('[SweepingGenerator]: sending emergency hover point to octomap planner: x: {}, y: {}, z: {}'.format(point.reference.position.x, point.reference.position.y, point.reference.position.z))
+                rospy.sleep(2.0)
                 clear_resp = self.call_octomap_planner(point)
                 if clear_resp.success:
                     rospy.loginfo('[SweepingGenerator]: Octomap planner path cleared successfully')
@@ -1155,6 +1204,60 @@ class Node:
             self.timeout_counter += 1
 
     # #} end of timerComm()
+
+    # #{ timerRcEmergency()
+
+    def timerRcEmergency(self, event=None):
+
+        if not self.is_initialized:
+            return
+
+        # If RC stream is stale, fail-safe to OFF to avoid retries from stale ON state.
+        if self.last_rc_message_time != rospy.Time(0):
+            if (rospy.Time.now() - self.last_rc_message_time) > self.rc_message_timeout:
+                if self.rc_emergency_button_on:
+                    rospy.logwarn_throttle(2.0, '[SweepingGenerator]: RC timeout, forcing emergency button state OFF')
+                self.rc_emergency_button_on = False
+                self.emergency_rc_active = False
+                return
+
+        # Retry only while button is ON and emergency has not succeeded yet.
+        if not self.rc_emergency_button_on:
+            return
+
+        if self.emergency_rc_succeeded:
+            return
+
+        if self.rc_emergency_call_in_progress:
+            return
+
+        now = rospy.Time.now()
+        if (now - self.last_emergency_attempt) < self.rc_emergency_retry_period:
+            return
+
+        self.last_emergency_attempt = now
+        self.emergency_rc_active = True
+        self.rc_emergency_call_in_progress = True
+
+        rospy.logwarn('[SweepingGenerator]: RC emergency button ON, calling emergency service')
+
+        try:
+            result = self.callbackEmergency(TriggerRequest())
+        except Exception as e:
+            rospy.logerr('[SweepingGenerator]: emergency callback exception: %s', str(e))
+            result = TriggerResponse(success=False, message=str(e))
+        finally:
+            self.rc_emergency_call_in_progress = False
+
+        if result.success:
+            rospy.loginfo('[SweepingGenerator]: emergency service call successful: %s', result.message)
+            self.emergency_rc_active = False
+            self.emergency_rc_succeeded = True
+        else:
+            rospy.logerr('[SweepingGenerator]: emergency service call failed: %s', result.message)
+            self.emergency_rc_active = True
+
+    # #} end of timerRcEmergency()
 
     def main_follower(self):
 
