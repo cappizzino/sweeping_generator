@@ -21,6 +21,7 @@ from std_msgs.msg import UInt8, Float64
 from std_srvs.srv import Trigger, TriggerResponse, TriggerRequest
 from rospy import ServiceException
 from waypoints_latlog import SwarmInputs, compute_swarm_waypoint_lines
+from waypoints_latlog_2lines import TwoLineSwarmInputs, compute_two_line_swarm_waypoint_lines
 
 class Node:
 
@@ -104,19 +105,36 @@ class Node:
 
         self.offset_waypoint_utm_flag = rospy.get_param('~offset_waypoint_utm_flag', True)
         self.automated_calculation = rospy.get_param('~automated_calculation', False)
+        self.automated_calculation_1line = rospy.get_param('~automated_calculation_1line', False)
 
         if self.automated_calculation:
-            inp = SwarmInputs(
-                lat_start=rospy.get_param("~lat_start", 41.2209406896861),
-                lon_start=rospy.get_param("~lon_start", -8.527200278531424),
-                lat_end=rospy.get_param("~lat_end", 41.22115148976369),
-                lon_end=rospy.get_param("~lon_end", -8.527152346726584),
-                drones=self.drone_list,
-                distance_between_drones=rospy.get_param("~distance_between_drones", 3.0),
-                distance_line=rospy.get_param("~distance_line", 10.0),
-                altitude=rospy.get_param("~altitude", 5.0)
-            )
-            lines = compute_swarm_waypoint_lines(inp)
+            if self.automated_calculation_1line:
+                rospy.loginfo("Using 1-line swarm generation")
+                inp = SwarmInputs(
+                    lat_start=rospy.get_param("~lat_start", 41.2209406896861),
+                    lon_start=rospy.get_param("~lon_start", -8.527200278531424),
+                    lat_end=rospy.get_param("~lat_end", 41.22115148976369),
+                    lon_end=rospy.get_param("~lon_end", -8.527152346726584),
+                    drones=self.drone_list,
+                    distance_between_drones=rospy.get_param("~distance_between_drones", 3.0),
+                    distance_line=rospy.get_param("~distance_line", 10.0),
+                    altitude=rospy.get_param("~altitude", 5.0)
+                )
+                lines = compute_swarm_waypoint_lines(inp)
+            else:
+                rospy.loginfo("Using 2-line swarm generation")
+                inp = TwoLineSwarmInputs(
+                    lat_start=rospy.get_param("~lat_start", 41.2209406896861),
+                    lon_start=rospy.get_param("~lon_start", -8.527200278531424),
+                    lat_end=rospy.get_param("~lat_end", 41.22115148976369),
+                    lon_end=rospy.get_param("~lon_end", -8.527152346726584),
+                    drones=self.drone_list,
+                    distance_between_drones=rospy.get_param("~distance_between_drones", 3.0),
+                    distance_line=rospy.get_param("~distance_line", 10.0),
+                    distance_between_lines=rospy.get_param("~distance_between_lines", 3.0),
+                    altitude=rospy.get_param("~altitude", 5.0)
+                )
+                lines = compute_two_line_swarm_waypoint_lines(inp)
 
             # Output format 1: (num_lines) x (num_drones)
             print("Lines (line_index -> list of (lat,lon,alt) per drone in input order):")
