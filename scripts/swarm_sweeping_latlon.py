@@ -487,6 +487,8 @@ class Node:
                 else:
                     rospy.logwarn('[SweepingGenerator]: set_relative_heading service not enabled')
 
+                rospy.sleep(7.0)
+
                 if self.sc_disable_altitude_fusion_enable:
                     try:
                         response = self.sc_disable_altitude_fusion()
@@ -727,6 +729,30 @@ class Node:
                 rospy.logwarn('[SweepingGenerator]: processing waypoint index: {}'.format(self.waypoint_count))
                 rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(waypoint[0], waypoint[1], waypoint[2]))
 
+                ###################################################
+                # waypoint_utm = self.latlon_to_utm(waypoint[0], waypoint[1], waypoint[2])
+
+                # ref = ReferenceStamped()
+                # ref.header.frame_id = self.uav_name + "/" + "utm_navsat"
+                # ref.reference.position.x = waypoint_utm[0]
+                # ref.reference.position.y = waypoint_utm[1]
+                # ref.reference.position.z = 0.0
+                # ref.reference.heading = 0.0
+
+                # request = TransformReferenceSrvRequest()
+                # request.frame_id = self.uav_name + "/" + "liosam_origin"
+                # request.reference = ref
+
+                # try:
+                #     transform_response = self.sc_transform(request)
+                #     rospy.loginfo(f"Response: success={transform_response.success}, message='{transform_response.message}'")
+                # except rospy.ServiceException as e:
+                #     rospy.logerr(f"Service call failed: {e}")
+                #     return Vec1Response(False, "transform reference failed")
+
+                # rospy.loginfo('[SweepingGenerator]: transformed waypoint coordinates: x: {}, y: {}, z: {}, frame: {}'.format(transform_response.reference.reference.position.x, transform_response.reference.reference.position.y, transform_response.reference.reference.position.z, transform_response.reference.header.frame_id))
+
+                ###################################################
                 ref = ReferenceStamped()
                 ref.header.frame_id = "latlon_origin"
                 ref.reference.position.x = waypoint[0]
@@ -746,6 +772,7 @@ class Node:
                     return Vec1Response(False, "transform reference failed")
 
                 rospy.loginfo('[SweepingGenerator]: transformed waypoint coordinates: x: {}, y: {}, z: {}, frame: {}'.format(transform_response.reference.reference.position.x, transform_response.reference.reference.position.y, transform_response.reference.reference.position.z, transform_response.reference.header.frame_id))
+                ###################################################
 
                 # point = ReferenceStampedSrvRequest()
                 # point.header.stamp = rospy.Time.now()
