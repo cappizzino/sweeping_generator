@@ -190,7 +190,7 @@ class Node:
         if self.estimator_change_timer < 0.0:
             rospy.logwarn('[SweepingGenerator]: invalid ~estimator_change_timer=%.3f, using 0.0', self.estimator_change_timer)
             self.estimator_change_timer = 0.0
-        self.estimator_change_request_value = "liosam"
+        self.estimator_change_request_value = rospy.get_param('~estimator_change_request_value', 'liosam')
         self.flying_normally_since = None
         self.estimator_change_done = False
         self.last_estimator_change_attempt = rospy.Time(0)
