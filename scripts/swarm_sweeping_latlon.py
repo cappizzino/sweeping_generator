@@ -105,6 +105,7 @@ class Node:
         self.wing_index = math.ceil(self.id/2)
 
         self.follower_path = rospy.get_param("~follower_path", "line")
+        self.rc_waypoint_enable = rospy.get_param("~rc_waypoint_enable", False)
 
         self.has_goal = False
 
@@ -191,6 +192,7 @@ class Node:
         self.offset_waypoint_utm = []
         self.waypoint_count = 0
         self.publish_leader_index = False
+        self.rc_waypoint_started = not self.rc_waypoint_enable
         self.waypoint_frame = rospy.get_param(
             '~waypoint_frame', "world_origin")
         self.leader_index = None
@@ -303,7 +305,10 @@ class Node:
             self.sub_mpc = rospy.Subscriber(
                 f"/{self.uav_name}/control_manager/mpc_tracker/predicted_trajectory_debugging", PoseArray, self.callbackMPC)
         else:
-            if self.leader_reference_set == True:
+            if self.rc_waypoint_enable:
+                rospy.loginfo(
+                    '[SweepingGenerator]: rc_waypoint_enable active, follower leader-index synchronization disabled')
+            elif self.leader_reference_set == True:
                 self.sub_reference = rospy.Subscriber(
                     f"/{self.leader_name}/leader_reference", Reference, self.reference_cb)
             else:
@@ -344,7 +349,7 @@ class Node:
                 f"/{self.uav_name}/control_manager/reference", ReferenceStamped, queue_size=1)
 
         # | --------------------- service servers -------------------- |
-        if self.leader_swarm:
+        if self.leader_swarm and not self.rc_waypoint_enable:
             self.ss_start = rospy.Service(
                 '~start_in', Vec1, self.callbackStart)
         self.ss_emergency = rospy.Service(
@@ -419,8 +424,9 @@ class Node:
             self.timer_index = rospy.Timer(rospy.Duration(
                 1.0/self.timer_pose_rate), self.timerIndex)
         else:
-            self.timer_comm = rospy.Timer(rospy.Duration(
-                1.0/self.timer_comm_rate), self.timerComm)
+            if not self.rc_waypoint_enable:
+                self.timer_comm = rospy.Timer(rospy.Duration(
+                    1.0/self.timer_comm_rate), self.timerComm)
         self.timer_rc_emergency = rospy.Timer(rospy.Duration(
             1.0/self.rc_emergency_timer_rate), self.timerRcEmergency)
 
@@ -428,7 +434,7 @@ class Node:
 
         self.is_initialized = True
 
-        if not self.leader_swarm and self.octomap_planner_set and self.leader_reference_set == False:
+        if not self.leader_swarm and self.octomap_planner_set and self.leader_reference_set == False and not self.rc_waypoint_enable:
             self.main_follower()
 
         rospy.spin()
@@ -683,6 +689,69 @@ class Node:
 
         rospy.loginfo('[SweepingGenerator]: entered waypoint_manager')
 
+        if not self.rc_waypoint_enable:
+            return
+
+        if not self.octomap_planner_set:
+            rospy.logwarn(
+                '[SweepingGenerator]: rc_waypoint_enable requires octomap_planner_set=true')
+            return
+
+        if not self.rc_waypoint_started:
+            rospy.logwarn(
+                '[SweepingGenerator]: RC waypoint mode not ready on %s, place the RC switch in the middle position first',
+                self.uav_name
+            )
+            return
+
+        if self.leader_swarm:
+            next_index = self.waypoint_count + 1
+        else:
+            if not self.altitude_offset_ready:
+                rospy.logwarn_throttle(
+                    2.0,
+                    '[SweepingGenerator]: waiting for altitude offset before RC waypoint stepping'
+                )
+                return
+            if self.local_index is None:
+                next_index = 0
+            else:
+                next_index = self.local_index + 1
+
+        waypoint_count_total = self.get_waypoint_count_total()
+        if waypoint_count_total == 0:
+            rospy.logwarn('[SweepingGenerator]: no waypoints configured')
+            return
+
+        if next_index >= waypoint_count_total:
+            rospy.logwarn(
+                '[SweepingGenerator]: waypoint_manager reached last waypoint (%d), ignoring request',
+                waypoint_count_total - 1
+            )
+            return
+
+        # Advance the local RC-driven index even if the planner call fails, so
+        # the next RC trigger always attempts the following waypoint.
+        if self.leader_swarm:
+            self.waypoint_count = next_index
+        else:
+            self.local_index = next_index
+
+        try:
+            response = self.send_waypoint_index(next_index)
+            rospy.loginfo(
+                '[SweepingGenerator]: waypoint_manager sent index %d, success=%s, message=%s',
+                next_index,
+                response.success,
+                response.message
+            )
+        except rospy.ServiceException as e:
+            rospy.logerr(
+                '[SweepingGenerator]: waypoint_manager failed to send index %d: %s',
+                next_index,
+                str(e)
+            )
+
     # #} end of waypoint_manager
 
     def rc_callback(self, msg):
@@ -705,6 +774,8 @@ class Node:
         if not self.rc_switch_initialized:
             if self.waypoint_threshold < self.rc_switch_value < self.rc_emergency_threshold:
                 self.rc_switch_initialized = True
+                if self.rc_waypoint_enable:
+                    self.rc_waypoint_started = True
                 rospy.loginfo(
                     '[SweepingGenerator]: RC switch initialized in middle position')
             else:
@@ -876,6 +947,112 @@ class Node:
 
         return self.sc_octomap_planner.call(point)
 
+    def get_waypoint_count_total(self):
+
+        if self.leader_swarm:
+            return len(self.waypoint_list)
+
+        if self.offset_waypoint_utm_flag:
+            return len(self.offset_waypoint_utm)
+
+        return len(self.waypoint_list)
+
+    def build_waypoint_request(self, target_index):
+
+        waypoint_count_total = self.get_waypoint_count_total()
+        if target_index < 0 or target_index >= waypoint_count_total:
+            raise IndexError(
+                '[SweepingGenerator]: waypoint index {} out of range [0, {}]'.format(
+                    target_index, waypoint_count_total - 1)
+            )
+
+        if self.leader_swarm:
+            waypoint = self.waypoint_list[target_index]
+            rospy.loginfo('[SweepingGenerator]: waypoint[%d] coordinates: x: %s, y: %s, z: %s',
+                          target_index, waypoint[0], waypoint[1], waypoint[2])
+
+            ref = ReferenceStamped()
+            ref.header.frame_id = "latlon_origin"
+            ref.reference.position.x = waypoint[0]
+            ref.reference.position.y = waypoint[1]
+            ref.reference.position.z = 0.0
+            ref.reference.heading = 0.0
+
+            request = TransformReferenceSrvRequest()
+            request.frame_id = self.uav_name + "/" + self.waypoint_frame
+            request.reference = ref
+
+            transform_response = self.sc_transform(request)
+            if not transform_response.success:
+                raise rospy.ServiceException(
+                    'transform reference failed: {}'.format(transform_response.message))
+
+            return self.build_octomap_request(
+                self.uav_name + "/" + self.waypoint_frame,
+                transform_response.reference.reference.position.x,
+                transform_response.reference.reference.position.y,
+                waypoint[2],
+                0.0
+            )
+
+        if self.offset_waypoint_utm_flag:
+            return self.build_octomap_request(
+                self.uav_name + "/" + self.frame_publish,
+                self.offset_waypoint_utm[target_index][0],
+                self.offset_waypoint_utm[target_index][1],
+                self.offset_waypoint_utm[target_index][2] + self.altitude_offset_z,
+                0.0
+            )
+
+        waypoint = self.waypoint_list[target_index]
+        rospy.loginfo('[SweepingGenerator]: waypoint[%d] coordinates: x: %s, y: %s, z: %s',
+                      target_index, waypoint[0], waypoint[1], waypoint[2])
+
+        ref = ReferenceStamped()
+        ref.header.frame_id = "latlon_origin"
+        ref.reference.position.x = waypoint[0]
+        ref.reference.position.y = waypoint[1]
+        ref.reference.position.z = 0.0
+        ref.reference.heading = 0.0
+
+        request = TransformReferenceSrvRequest()
+        request.frame_id = self.uav_name + "/" + self.waypoint_frame
+        request.reference = ref
+
+        transform_response = self.sc_transform(request)
+        if not transform_response.success:
+            raise rospy.ServiceException(
+                'transform reference failed: {}'.format(transform_response.message))
+
+        return self.build_octomap_request(
+            self.uav_name + "/" + self.waypoint_frame,
+            transform_response.reference.reference.position.x,
+            transform_response.reference.reference.position.y,
+            waypoint[2] + self.altitude_offset_z,
+            0.0
+        )
+
+    def send_waypoint_index(self, target_index):
+
+        point = self.build_waypoint_request(target_index)
+
+        if self.octomap_request_type == "vec4":
+            rospy.loginfo('[SweepingGenerator]: sending waypoint[%d] to octomap planner: x: %s, y: %s, z: %s',
+                          target_index, point.goal[0], point.goal[1], point.goal[2])
+        else:
+            rospy.loginfo('[SweepingGenerator]: sending waypoint[%d] to octomap planner: x: %s, y: %s, z: %s',
+                          target_index, point.reference.position.x, point.reference.position.y, point.reference.position.z)
+
+        if self.leader_swarm:
+            self.waypoint_count = target_index
+            if self.publish_leader_index:
+                self.index_pub.publish(self.waypoint_count)
+        else:
+            self.local_index = target_index
+
+        self.has_goal = False
+        return self.call_octomap_planner(point)
+
     # #{ callbackStart():
 
     def callbackStart(self, req):
@@ -889,104 +1066,26 @@ class Node:
                 rospy.logwarn('[SweepingGenerator]: no waypoints configured')
                 return Vec1Response(False, "no waypoints configured")
 
+            if self.rc_waypoint_enable:
+                self.waypoint_count = -1
+                self.publish_leader_index = False
+                self.rc_waypoint_started = True
+                rospy.loginfo(
+                    '[SweepingGenerator]: rc_waypoint_enable active, leader mission armed and waiting for waypoint_manager()')
+                return Vec1Response(True, "rc waypoint mode armed")
+
             self.waypoint_count = 0
             self.publish_leader_index = True
             planner_response = None
 
             for waypoint_idx, waypoint in enumerate(self.waypoint_list):
-                self.waypoint_count = waypoint_idx
-                rospy.logwarn('[SweepingGenerator]: processing waypoint index: {}'.format(
-                    self.waypoint_count))
-                rospy.loginfo('[SweepingGenerator]: waypoint coordinates: x: {}, y: {}, z: {}'.format(
-                    waypoint[0], waypoint[1], waypoint[2]))
-
-                ###################################################
-                # waypoint_utm = self.latlon_to_utm(waypoint[0], waypoint[1], waypoint[2])
-
-                # ref = ReferenceStamped()
-                # ref.header.frame_id = self.uav_name + "/" + "utm_navsat"
-                # ref.reference.position.x = waypoint_utm[0]
-                # ref.reference.position.y = waypoint_utm[1]
-                # ref.reference.position.z = 0.0
-                # ref.reference.heading = 0.0
-
-                # request = TransformReferenceSrvRequest()
-                # request.frame_id = self.uav_name + "/" + "liosam_origin"
-                # request.reference = ref
-
-                # try:
-                #     transform_response = self.sc_transform(request)
-                #     rospy.loginfo(f"Response: success={transform_response.success}, message='{transform_response.message}'")
-                # except rospy.ServiceException as e:
-                #     rospy.logerr(f"Service call failed: {e}")
-                #     return Vec1Response(False, "transform reference failed")
-
-                # rospy.loginfo('[SweepingGenerator]: transformed waypoint coordinates: x: {}, y: {}, z: {}, frame: {}'.format(transform_response.reference.reference.position.x, transform_response.reference.reference.position.y, transform_response.reference.reference.position.z, transform_response.reference.header.frame_id))
-
-                ###################################################
-                ref = ReferenceStamped()
-                ref.header.frame_id = "latlon_origin"
-                ref.reference.position.x = waypoint[0]
-                ref.reference.position.y = waypoint[1]
-                ref.reference.position.z = 0.0
-                ref.reference.heading = 0.0
-
-                request = TransformReferenceSrvRequest()
-                request.frame_id = self.uav_name + "/" + self.waypoint_frame
-                request.reference = ref
-
                 try:
-                    transform_response = self.sc_transform(request)
-                    rospy.loginfo(
-                        f"Response: success={transform_response.success}, message='{transform_response.message}'")
-                except rospy.ServiceException as e:
-                    rospy.logerr(f"Service call failed: {e}")
-                    return Vec1Response(False, "transform reference failed")
-
-                rospy.loginfo('[SweepingGenerator]: transformed waypoint coordinates: x: {}, y: {}, z: {}, frame: {}'.format(transform_response.reference.reference.position.x,
-                              transform_response.reference.reference.position.y, transform_response.reference.reference.position.z, transform_response.reference.header.frame_id))
-                ###################################################
-
-                # point = ReferenceStampedSrvRequest()
-                # point.header.stamp = rospy.Time.now()
-                # point.header.frame_id = self.uav_name + "/" + self.waypoint_frame
-                # point.reference.position.x = transform_response.reference.reference.position.x
-                # point.reference.position.y = transform_response.reference.reference.position.y
-                # point.reference.position.z = waypoint[2]
-                # point.reference.heading = 0.0
-
-                # point = Vec4Request()
-                # point.goal[0] = transform_response.reference.reference.position.x
-                # point.goal[1] = transform_response.reference.reference.position.y
-                # point.goal[2] = waypoint[2]
-                # point.goal[3] = 0.0
-
-                # rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(point.goal[0], point.goal[1], point.goal[2]))
-                point = self.build_octomap_request(
-                    self.uav_name + "/" + self.waypoint_frame,
-                    transform_response.reference.reference.position.x,
-                    transform_response.reference.reference.position.y,
-                    waypoint[2],
-                    0.0
-                )
-
-                if self.octomap_request_type == "vec4":
-                    rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(
-                        point.goal[0], point.goal[1], point.goal[2]))
-                else:
-                    rospy.loginfo('[SweepingGenerator]: sending point to octomap planner: x: {}, y: {}, z: {}'.format(
-                        point.reference.position.x, point.reference.position.y, point.reference.position.z))
-                self.index_pub.publish(self.waypoint_count)
-
-                try:
-                    self.has_goal = False
-                    # planner_response = self.sc_octomap_planner_vec.call(point)
-                    planner_response = self.call_octomap_planner(point)
+                    planner_response = self.send_waypoint_index(waypoint_idx)
                     rospy.loginfo(
                         f"Response: success={planner_response.success}, message='{planner_response.message}'")
                 except rospy.ServiceException as e:
                     rospy.logerr(
-                        f"[SweepingGenerator]: octomap planner service not callable: {e}")
+                        f"[SweepingGenerator]: failed to send waypoint index {waypoint_idx}: {e}")
                     return Vec1Response(False, "octomap planner service not callable")
 
                 if not planner_response.success:

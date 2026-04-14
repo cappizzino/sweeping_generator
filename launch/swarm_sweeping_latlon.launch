@@ -30,6 +30,7 @@
       <param name="distance_between_lines" value="3.0" />
       <param name="second_line_lateral_shift_fraction" value="0.0" />
       <param name="third_line_lateral_shift_fraction" value="0.0" />
+      <param name="rc_waypoint_enable" value="false" />
       <param name="waypoint_threshold" value="0.3" />
       <param name="rc_emergency_threshold" value="0.7" />
 
