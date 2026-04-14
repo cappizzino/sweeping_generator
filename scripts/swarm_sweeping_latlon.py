@@ -165,7 +165,7 @@ class Node:
                     distance_line=rospy.get_param("~distance_line", 10.0),
                     distance_between_lines=rospy.get_param(
                         "~distance_between_lines", 3.0),
-                    altitude=rospy.get_param("~altitude", 5.0)
+                    altitude=rospy.get_param("~altitude", 5.0),
                     second_line_lateral_shift_fraction=rospy.get_param(
                         "~second_line_lateral_shift_fraction", 0.0),
                     third_line_lateral_shift_fraction=rospy.get_param(
@@ -264,6 +264,18 @@ class Node:
         self.emergency_rc_succeeded = False
         self.rc_emergency_threshold = float(
             rospy.get_param('~rc_emergency_threshold', 0.7))
+        self.waypoint_threshold = float(
+            rospy.get_param('~waypoint_threshold', 0.3))
+        if self.waypoint_threshold >= self.rc_emergency_threshold:
+            fallback_waypoint_threshold = max(
+                0.0, self.rc_emergency_threshold - 0.1)
+            rospy.logwarn(
+                '[SweepingGenerator]: invalid ~waypoint_threshold=%.3f, it must be lower than ~rc_emergency_threshold=%.3f. Using %.3f instead.',
+                self.waypoint_threshold,
+                self.rc_emergency_threshold,
+                fallback_waypoint_threshold
+            )
+            self.waypoint_threshold = fallback_waypoint_threshold
         self.rc_emergency_retry_period = rospy.Duration(
             float(rospy.get_param('~rc_emergency_retry_period', 1.0)))
         self.rc_emergency_timer_rate = float(
@@ -276,7 +288,11 @@ class Node:
             float(rospy.get_param('~rc_message_timeout', 1.0)))
         self.last_emergency_attempt = rospy.Time(0)
         self.last_rc_message_time = rospy.Time(0)
+        self.rc_switch_value = (
+            self.waypoint_threshold + self.rc_emergency_threshold) / 2.0
+        self.rc_switch_initialized = False
         self.rc_emergency_button_on = False
+        self.rc_waypoint_button_on = False
         self.rc_emergency_call_in_progress = False
         rospy.loginfo('[SweepingGenerator]: initialized')
 
@@ -663,6 +679,12 @@ class Node:
 
     # #{ callbackRcChannels():
 
+    def waypoint_manager(self):
+
+        rospy.loginfo('[SweepingGenerator]: entered waypoint_manager')
+
+    # #} end of waypoint_manager
+
     def rc_callback(self, msg):
 
         if not self.is_initialized:
@@ -678,9 +700,31 @@ class Node:
         now = rospy.Time.now()
         self.last_rc_message_time = now
 
-        rc_button_on = msg.channels[11] > self.rc_emergency_threshold
-        if rc_button_on != self.rc_emergency_button_on:
-            if rc_button_on:
+        self.rc_switch_value = msg.channels[11]
+
+        if not self.rc_switch_initialized:
+            if self.waypoint_threshold < self.rc_switch_value < self.rc_emergency_threshold:
+                self.rc_switch_initialized = True
+                rospy.loginfo(
+                    '[SweepingGenerator]: RC switch initialized in middle position')
+            else:
+                rospy.logwarn_throttle(
+                    2.0,
+                    '[SweepingGenerator]: RC switch must start in middle position (%.3f < value < %.3f). Current value: %.3f',
+                    self.waypoint_threshold,
+                    self.rc_emergency_threshold,
+                    self.rc_switch_value
+                )
+                self.rc_emergency_button_on = False
+                self.rc_waypoint_button_on = False
+                self.emergency_rc_active = False
+                return
+
+        rc_emergency_button_on = self.rc_switch_value > self.rc_emergency_threshold
+        rc_waypoint_button_on = self.rc_switch_value < self.waypoint_threshold
+
+        if rc_emergency_button_on != self.rc_emergency_button_on:
+            if rc_emergency_button_on:
                 rospy.logwarn(
                     '[SweepingGenerator]: RC emergency button pressed')
                 self.emergency_rc_succeeded = False
@@ -690,7 +734,17 @@ class Node:
                 self.emergency_rc_active = False
                 self.emergency_rc_succeeded = False
 
-        self.rc_emergency_button_on = rc_button_on
+        if rc_waypoint_button_on != self.rc_waypoint_button_on:
+            if rc_waypoint_button_on:
+                rospy.loginfo(
+                    '[SweepingGenerator]: RC waypoint switch position detected')
+                self.waypoint_manager()
+            else:
+                rospy.loginfo(
+                    '[SweepingGenerator]: RC waypoint switch released to middle position')
+
+        self.rc_emergency_button_on = rc_emergency_button_on
+        self.rc_waypoint_button_on = rc_waypoint_button_on
 
     # #} end of callbackRcChannels
 
@@ -1416,7 +1470,13 @@ class Node:
                 if self.rc_emergency_button_on:
                     rospy.logwarn_throttle(
                         2.0, '[SweepingGenerator]: RC timeout, forcing emergency button state OFF')
+                if self.rc_waypoint_button_on:
+                    rospy.logwarn_throttle(
+                        2.0, '[SweepingGenerator]: RC timeout, forcing waypoint switch state to middle position')
+                self.rc_switch_value = (
+                    self.waypoint_threshold + self.rc_emergency_threshold) / 2.0
                 self.rc_emergency_button_on = False
+                self.rc_waypoint_button_on = False
                 self.emergency_rc_active = False
                 return
 

@@ -19,6 +19,7 @@
 
       <param name="offset_waypoint_utm_flag" value="false" />
       <param name="automated_calculation" value="true" />
+      <param name="automated_calculation_number_lines" value="2" />
       <param name="lat_start" value="47.3976977" />
       <param name="lon_start" value="8.5457273" />
       <param name="lat_end" value="47.3978345" />
@@ -26,6 +27,11 @@
       <param name="altitude" value="1.5" />
       <param name="distance_between_drones" value="5.0" />
       <param name="distance_line" value="10.0" />
+      <param name="distance_between_lines" value="3.0" />
+      <param name="second_line_lateral_shift_fraction" value="0.0" />
+      <param name="third_line_lateral_shift_fraction" value="0.0" />
+      <param name="waypoint_threshold" value="0.3" />
+      <param name="rc_emergency_threshold" value="0.7" />
 
       <remap from="~control_manager_diag_in" to="control_manager/diagnostics" />
       <remap from="~octomap_planner_diag_in" to="octomap_planner/diagnostics" />
