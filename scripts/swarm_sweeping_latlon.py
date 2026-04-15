@@ -118,6 +118,13 @@ class Node:
             '~automated_calculation', False)
         self.automated_calculation_number_lines = int(
             rospy.get_param('~automated_calculation_number_lines', 2))
+        self.wait_for_line = float(rospy.get_param('~wait_for_line', 0.0))
+        if self.wait_for_line < 0.0:
+            rospy.logwarn(
+                '[SweepingGenerator]: invalid ~wait_for_line=%.3f, using 0.0',
+                self.wait_for_line
+            )
+            self.wait_for_line = 0.0
 
         if self.automated_calculation:
             if self.automated_calculation_number_lines == 1:
@@ -742,6 +749,18 @@ class Node:
         else:
             self.local_index = next_index
 
+        line_delay_multiplier = self.get_three_line_row_delay_multiplier(
+            next_index)
+        if line_delay_multiplier > 0:
+            delay_s = self.wait_for_line * float(line_delay_multiplier)
+            rospy.loginfo(
+                '[SweepingGenerator]: delaying waypoint[%d] by %.2fs for line %d',
+                next_index,
+                delay_s,
+                line_delay_multiplier + 1
+            )
+            rospy.sleep(delay_s)
+
         try:
             response = self.send_waypoint_index(next_index)
             rospy.loginfo(
@@ -1057,6 +1076,37 @@ class Node:
 
         self.has_goal = False
         return self.call_octomap_planner(point)
+
+    def get_three_line_row_delay_multiplier(self, target_index):
+
+        if target_index != 0:
+            return 0
+
+        if not self.rc_waypoint_enable:
+            return 0
+
+        if not self.automated_calculation:
+            return 0
+
+        if self.automated_calculation_number_lines != 3:
+            return 0
+
+        if self.wait_for_line <= 0.0:
+            return 0
+
+        total_drones = len(self.drone_list)
+        base = total_drones // 3
+        remainder = total_drones % 3
+        front_count = base + (1 if remainder >= 1 else 0)
+        middle_count = base + (1 if remainder >= 2 else 0)
+
+        if self.id < front_count:
+            return 0
+
+        if self.id < (front_count + middle_count):
+            return 1
+
+        return 2
 
     # #{ callbackStart():
 
