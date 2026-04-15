@@ -193,6 +193,11 @@ class Node:
         self.waypoint_count = 0
         self.publish_leader_index = False
         self.rc_waypoint_started = not self.rc_waypoint_enable
+        if self.rc_waypoint_enable:
+            rospy.loginfo(
+                '[SweepingGenerator]: RC waypoint mode enabled, waiting for RC switch activation to start'
+            )
+            self.waypoint_count = -1
         self.waypoint_frame = rospy.get_param(
             '~waypoint_frame', "world_origin")
         self.leader_index = None
